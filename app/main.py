@@ -1,8 +1,10 @@
 from typing import Union
-
 from fastapi import FastAPI
+from app.api.v1.routes import profiles
 
 app = FastAPI()
+
+app.include_router(profiles.router)
 
 
 @app.get("/")
