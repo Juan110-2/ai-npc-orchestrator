@@ -10,13 +10,15 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.scenario_repository import ScenarioRepository
 from app.services.orchestrator import ConversationOrchestrator
+from app.services.conversation_heuristics import ConversationHeuristics, MessageCategory
 from app.services.intervention_evaluator import evaluate_intervention
-from app.services.severity_manager import adjust_severity
 
 router = APIRouter(
     prefix="/conversation",
     tags=["conversation"]
 )
+
+heuristics = ConversationHeuristics()
 
 @router.post("/{session_id}", response_model=ConversationMessageResponse)
 def converse(
@@ -50,16 +52,26 @@ def converse(
         risk_flags=[]
     )
 
-    try:
-        evaluation = evaluate_intervention(user_input)
-        impact = evaluation.get("overall_impact", 0)
-    except Exception:
-        impact = 0  # fallback seguro
-
-    session.current_severity = adjust_severity(
-        session.current_severity,
-        impact
+    decision = heuristics.decide(
+        user_text=user_input,
+        current_severity=session.current_severity,
     )
+
+    session.current_severity = decision.next_severity
+
+    # Second semantic signal: if category is uncertain (neutral/confusing),
+    # use intervention impact to avoid frozen severity trajectories.
+    try:
+        eval_data = evaluate_intervention(user_input)
+        impact = int(eval_data.get("overall_impact", 0))
+    except Exception:
+        impact = 0
+
+    if decision.category in (MessageCategory.NEUTRAL, MessageCategory.CONFUSING) and impact != 0:
+        session.current_severity = max(1, min(5, session.current_severity + impact))
+
+    if decision.should_close:
+        session.ended_at = datetime.utcnow()
     db.commit()
 
     # Generar respuesta del paciente
@@ -67,15 +79,15 @@ def converse(
         profile=profile,
         scenario=scenario,
         current_severity=session.current_severity,
-        user_input=user_input
+        user_input=user_input,
+        response_mode=decision.response_mode.value,
+        max_sentences=decision.max_sentences,
+        should_rotate_focus=decision.should_rotate_focus,
+        category=decision.category.value,
     )
 
-    if session.current_severity == 0:
-        session.ended_at = datetime.utcnow()
-        db.commit()
-
     if session.current_severity <= 0:
-        session.current_severity = 0 
+        session.current_severity = 0
         session.ended_at = datetime.utcnow()
         db.commit()
 

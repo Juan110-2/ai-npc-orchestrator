@@ -14,8 +14,8 @@ class OpenAIClient(AIClient):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=60,
-            temperature=0.6
+            max_tokens=260,
+            temperature=0.3
         )
 
         return response.choices[0].message.content
