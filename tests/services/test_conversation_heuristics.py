@@ -31,6 +31,21 @@ class TestConversationHeuristics(unittest.TestCase):
         self.assertEqual(decision.response_mode, ResponseMode.EMPATHIC)
 
     @patch("app.services.conversation_heuristics.TurnClassifier.classify")
+    def test_supportive_low_confidence_does_not_decrease(self, mock_classify):
+        mock_classify.return_value = TurnClassification("supportive", 0.61, "weak signal")
+        decision = self.h.decide("te escucho", current_severity=3)
+        self.assertEqual(decision.category, MessageCategory.SUPPORTIVE)
+        self.assertEqual(decision.next_severity, 3)
+
+    @patch("app.services.conversation_heuristics.TurnClassifier.classify")
+    def test_indifferent_turn_increases_when_distress_is_high(self, mock_classify):
+        mock_classify.return_value = TurnClassification("indifferent", 0.88, "cold")
+        decision = self.h.decide("bueno, ajam", current_severity=3)
+        self.assertEqual(decision.category, MessageCategory.INDIFFERENT)
+        self.assertEqual(decision.next_severity, 4)
+        self.assertEqual(decision.response_mode, ResponseMode.DEFENSIVE)
+
+    @patch("app.services.conversation_heuristics.TurnClassifier.classify")
     def test_inappropriate_rotates_focus(self, mock_classify):
         mock_classify.return_value = TurnClassification("inappropriate", 0.91, "offense")
         decision = self.h.decide("Mensaje hostil", current_severity=2)

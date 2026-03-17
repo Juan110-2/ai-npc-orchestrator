@@ -11,6 +11,7 @@ class ConversationOrchestrator:
         scenario,
         current_severity: int,
         user_input: str,
+        conversation_history: list | None = None,
         response_mode: str = "neutral",
         max_sentences: int = 3,
         should_rotate_focus: bool = False,
@@ -204,7 +205,8 @@ class ConversationOrchestrator:
         """
 
         ai = get_ai_client()
-        return ai.generate_response(system_prompt, user_input)
+        context_messages = ConversationOrchestrator._build_context_messages(conversation_history)
+        return ai.generate_response(system_prompt, user_input, context_messages=context_messages)
 
     @staticmethod
     def _fallback_reactive_response(response_mode: str, current_severity: int) -> str | None:
@@ -221,3 +223,26 @@ class ConversationOrchestrator:
             return "Eso me lastima y me pone a la defensiva. Si me hablas así, siento que todo empeora."
 
         return None
+
+    @staticmethod
+    def _build_context_messages(conversation_history: list | None) -> list[dict[str, str]]:
+        """Mapea historial de BD a roles de chat manteniendo el contexto completo."""
+        if not conversation_history:
+            return []
+
+        role_map = {
+            "trainee": "user",
+            "patient": "assistant",
+            "user": "user",
+            "assistant": "assistant",
+        }
+
+        mapped_messages: list[dict[str, str]] = []
+        for message in conversation_history:
+            role = role_map.get(getattr(message, "role", None), "user")
+            content = (getattr(message, "content", "") or "").strip()
+            if not content:
+                continue
+            mapped_messages.append({"role": role, "content": content})
+
+        return mapped_messages
