@@ -11,6 +11,7 @@ from app.services.turn_classifier import TurnClassifier
 
 class MessageCategory(str, Enum):
     SUPPORTIVE = "supportive"
+    INDIFFERENT = "indifferent"
     NEUTRAL = "neutral"
     CONFUSING = "confusing"
     INVALIDATING = "invalidating"
@@ -48,6 +49,7 @@ class ConversationHeuristics:
         MessageCategory.RISK,
         MessageCategory.INAPPROPRIATE,
         MessageCategory.INVALIDATING,
+        MessageCategory.INDIFFERENT,
         MessageCategory.SUPPORTIVE,
         MessageCategory.CONFUSING,
         MessageCategory.NEUTRAL,
@@ -58,31 +60,41 @@ class ConversationHeuristics:
 
     def decide(self, user_text: str, current_severity: int) -> HeuristicDecision:
         normalized = self._normalize(user_text)
-        category, matched_rules = self._classify(normalized)
-        return self._apply_rules(category, current_severity, normalized, matched_rules)
+        category, matched_rules, confidence = self._classify(normalized)
+        return self._apply_rules(
+            category,
+            current_severity,
+            normalized,
+            matched_rules,
+            confidence,
+        )
 
-    def _classify(self, normalized_text: str) -> Tuple[MessageCategory, Tuple[str, ...]]:
+    def _classify(self, normalized_text: str) -> Tuple[MessageCategory, Tuple[str, ...], float]:
         if not normalized_text:
-            return MessageCategory.CONFUSING, ("empty_message",)
+            return MessageCategory.CONFUSING, ("empty_message",), 0.0
 
         semantic = self.turn_classifier.classify(normalized_text)
         if semantic:
             try:
                 category = MessageCategory(semantic.category)
-                return category, (
-                    f"semantic:{semantic.source}:{semantic.category}:{semantic.confidence:.2f}",
-                    f"rationale:{semantic.rationale}",
+                return (
+                    category,
+                    (
+                        f"semantic:{semantic.source}:{semantic.category}:{semantic.confidence:.2f}",
+                        f"rationale:{semantic.rationale}",
+                    ),
+                    float(semantic.confidence),
                 )
             except ValueError:
                 pass
 
         # Structural fallback without lexical word lists.
         if len(normalized_text) <= 2:
-            return MessageCategory.CONFUSING, ("fallback:too_short",)
+            return MessageCategory.CONFUSING, ("fallback:too_short",), 0.4
         if not any(char.isalpha() for char in normalized_text):
-            return MessageCategory.CONFUSING, ("fallback:no_alpha",)
+            return MessageCategory.CONFUSING, ("fallback:no_alpha",), 0.4
 
-        return MessageCategory.NEUTRAL, ("fallback:neutral",)
+        return MessageCategory.NEUTRAL, ("fallback:neutral",), 0.5
 
     def _apply_rules(
         self,
@@ -90,8 +102,10 @@ class ConversationHeuristics:
         current_severity: int,
         normalized_text: str,
         matched_rules: Tuple[str, ...],
+        confidence: float,
     ) -> HeuristicDecision:
         severity = self._clamp(current_severity)
+        confidence = max(0.0, min(1.0, float(confidence)))
 
         next_severity = severity
         should_close = False
@@ -100,10 +114,21 @@ class ConversationHeuristics:
         max_sentences = 3
 
         if category == MessageCategory.SUPPORTIVE:
-            next_severity = self._clamp(severity - 1)
+            # No bajar severidad de forma automatica por un solo turno de apoyo.
+            # Exigimos una senal semantica relativamente fuerte.
+            if confidence >= 0.82 and len(normalized_text) >= 10 and severity >= 2:
+                next_severity = self._clamp(severity - 1)
+            else:
+                next_severity = severity
             response_mode = ResponseMode.EMPATHIC
-            if severity <= 2:
+            if next_severity <= 1 and confidence >= 0.9:
                 should_close = True
+
+        elif category == MessageCategory.INDIFFERENT:
+            # La indiferencia no contiene: con malestar medio-alto tiende a empeorar.
+            next_severity = self._clamp(severity + 1 if severity >= 3 else severity)
+            response_mode = ResponseMode.DEFENSIVE if severity >= 3 else ResponseMode.CLARIFY
+            max_sentences = 2
 
         elif category == MessageCategory.NEUTRAL:
             next_severity = severity
@@ -138,6 +163,7 @@ class ConversationHeuristics:
         # se termina la sesion para representar "peor escenario" de forma controlada.
         if next_severity >= self.MAX_SEVERITY and category in (
             MessageCategory.RISK,
+            MessageCategory.INDIFFERENT,
             MessageCategory.INVALIDATING,
             MessageCategory.INAPPROPRIATE,
         ):

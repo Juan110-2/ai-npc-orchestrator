@@ -36,3 +36,14 @@ class ConversationRepository:
             .order_by(ConversationMessage.created_at.asc())
             .all()
         )
+
+    @staticmethod
+    def list_recent_by_session(db: Session, session_id, limit: int = 12):
+        rows = (
+            db.query(ConversationMessage)
+            .filter(ConversationMessage.session_id == session_id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return list(reversed(rows))

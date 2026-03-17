@@ -67,12 +67,22 @@ def converse(
     except Exception:
         impact = 0
 
-    if decision.category in (MessageCategory.NEUTRAL, MessageCategory.CONFUSING) and impact != 0:
-        session.current_severity = max(1, min(5, session.current_severity + impact))
+    if decision.category in (MessageCategory.NEUTRAL, MessageCategory.CONFUSING, MessageCategory.INDIFFERENT) and impact != 0:
+        # Avoid easy drops in severity: indifferent turns should not improve the state
+        # even if the evaluator returns a slight negative impact by noise.
+        safe_impact = impact
+        if decision.category == MessageCategory.INDIFFERENT and impact < 0:
+            safe_impact = 0
+        session.current_severity = max(1, min(5, session.current_severity + safe_impact))
 
     if decision.should_close:
         session.ended_at = datetime.utcnow()
     db.commit()
+
+    context_history = ConversationRepository.list_by_session(
+        db=db,
+        session_id=session.id,
+    )
 
     # Generar respuesta del paciente
     response_text = ConversationOrchestrator.respond(
@@ -80,6 +90,7 @@ def converse(
         scenario=scenario,
         current_severity=session.current_severity,
         user_input=user_input,
+        conversation_history=context_history,
         response_mode=decision.response_mode.value,
         max_sentences=decision.max_sentences,
         should_rotate_focus=decision.should_rotate_focus,

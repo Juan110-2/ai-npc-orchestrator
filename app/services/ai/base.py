@@ -9,6 +9,7 @@ class AIClient(ABC):
     def generate_response(
         self,
         system_prompt: str,
-        user_prompt: str
+        user_prompt: str,
+        context_messages: list[dict[str, str]] | None = None,
     ) -> str:
         pass

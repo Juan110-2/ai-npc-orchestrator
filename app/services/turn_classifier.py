@@ -21,6 +21,7 @@ class TurnClassifier:
 
     ALLOWED_CATEGORIES = {
         "supportive",
+        "indifferent",
         "neutral",
         "confusing",
         "invalidating",
@@ -35,10 +36,11 @@ class TurnClassifier:
         system_prompt = """
         Eres un clasificador de turnos para simulacion clinica.
         Debes clasificar el ultimo mensaje del trainee en EXACTAMENTE una categoria:
-        supportive, neutral, confusing, invalidating, inappropriate, risk.
+        supportive, indifferent, neutral, confusing, invalidating, inappropriate, risk.
 
         Definiciones:
         - supportive: valida, acompana, escucha, muestra empatia genuina.
+        - indifferent: frio, cortante, distante o desinteresado; no acompana ni contiene.
         - neutral: informativo o social sin impacto emocional marcado.
         - confusing: ambiguo, poco claro, irrelevante o dificulta la continuidad.
         - invalidating: minimiza, presiona, juzga o descalifica emociones del paciente.
@@ -47,7 +49,7 @@ class TurnClassifier:
 
         Responde SOLO JSON valido con esta forma exacta:
         {
-          "category": "supportive|neutral|confusing|invalidating|inappropriate|risk",
+                    "category": "supportive|indifferent|neutral|confusing|invalidating|inappropriate|risk",
           "confidence": 0.0,
           "rationale": "breve"
         }
@@ -59,7 +61,7 @@ class TurnClassifier:
         if not data:
             retry_system_prompt = """
             Clasifica el mensaje en una sola categoria exacta:
-            supportive | neutral | confusing | invalidating | inappropriate | risk
+            supportive | indifferent | neutral | confusing | invalidating | inappropriate | risk
             Responde SOLO JSON: {"category":"...","confidence":0.0,"rationale":"..."}
             """
             raw_retry = ai.generate_response(system_prompt=retry_system_prompt, user_prompt=user_text)

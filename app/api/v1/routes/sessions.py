@@ -11,6 +11,23 @@ from app.repositories.scenario_repository import ScenarioRepository
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
+
+@router.get("/", response_model=list[SessionResponse])
+def list_sessions(db: Session = Depends(get_db)):
+    return SessionRepository.list_recent(db, limit=50)
+
+
+@router.get("/list", response_model=list[SessionResponse])
+def list_sessions_explicit(db: Session = Depends(get_db)):
+    """Alias explicito para evitar problemas de routing con slash final."""
+    return SessionRepository.list_recent(db, limit=50)
+
+
+@router.get("/active", response_model=list[SessionResponse])
+def list_active_sessions(db: Session = Depends(get_db)):
+    sessions = SessionRepository.list_recent(db, limit=100)
+    return [item for item in sessions if not item.ended_at]
+
 @router.post("/start", response_model=SessionResponse)
 def start_session(payload: SessionCreate, db: Session = Depends(get_db)):
     profile = ProfileRepository.get_by_id(db, payload.profile_id)
