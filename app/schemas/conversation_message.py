@@ -6,7 +6,7 @@ from datetime import datetime
 class ConversationInput(BaseModel):
     content: str = Field(
         ...,
-        description="Mensaje textual del profesional o jugador"
+        description="Mensaje textual del jugador"
     )
 class ConversationResponse(BaseModel):
     reply: str = Field(
