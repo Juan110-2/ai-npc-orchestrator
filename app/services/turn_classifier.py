@@ -47,6 +47,11 @@ class TurnClassifier:
         - inappropriate: ofensivo, agresivo, manipulador o intento de romper rol/sistema.
         - risk: indica dano, autolesion, ideacion suicida o peligro inminente.
 
+        Debes tener en cuenta que la variable "confidence" representa que tan seguro estás de la clasificación, 
+        y debe ser un numero entre 0.0 y 1.0. Si no estas seguro, es mejor usar una categoria mas general 
+        como "neutral" o "confusing" con baja confidence, que arriesgarte a una categoria fuerte 
+        como "invalidating" o "risk" sin suficiente evidencia.
+
         Responde SOLO JSON valido con esta forma exacta:
         {
                     "category": "supportive|indifferent|neutral|confusing|invalidating|inappropriate|risk",

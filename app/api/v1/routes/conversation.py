@@ -42,7 +42,7 @@ def converse(
     if not user_input:
         raise HTTPException(status_code=400, detail="Missing content")
 
-    # Guardar mensaje del trainee
+    # Guardar el turno del usuario antes de procesar para asegurar que el historial esté completo.
     ConversationRepository.add(
         db=db,
         session_id=session.id,
@@ -59,21 +59,21 @@ def converse(
 
     session.current_severity = decision.next_severity
 
-    # Second semantic signal: if category is uncertain (neutral/confusing),
-    # use intervention impact to avoid frozen severity trajectories.
-    try:
-        eval_data = evaluate_intervention(user_input)
-        impact = int(eval_data.get("overall_impact", 0))
-    except Exception:
-        impact = 0
+    if decision.category in (MessageCategory.NEUTRAL, MessageCategory.CONFUSING, MessageCategory.INDIFFERENT):
+        # Segunda señal semántica para categorías ambiguas.
+        # Sirve para evitar que la severidad se quede estancada.
+        try:
+            eval_data = evaluate_intervention(user_input)
+            impact = int(eval_data.get("overall_impact", 0))
+        except Exception:
+            impact = 0
 
-    if decision.category in (MessageCategory.NEUTRAL, MessageCategory.CONFUSING, MessageCategory.INDIFFERENT) and impact != 0:
-        # Avoid easy drops in severity: indifferent turns should not improve the state
-        # even if the evaluator returns a slight negative impact by noise.
-        safe_impact = impact
-        if decision.category == MessageCategory.INDIFFERENT and impact < 0:
-            safe_impact = 0
-        session.current_severity = max(1, min(5, session.current_severity + safe_impact))
+        if impact != 0:
+            # La indiferencia no debería mejorar el estado por ruido del evaluador.
+            safe_impact = impact
+            if decision.category == MessageCategory.INDIFFERENT and impact < 0:
+                safe_impact = 0
+            session.current_severity = max(1, min(5, session.current_severity + safe_impact))
 
     if decision.should_close:
         session.ended_at = datetime.utcnow()
@@ -84,7 +84,7 @@ def converse(
         session_id=session.id,
     )
 
-    # Generar respuesta del paciente
+    # La respuesta del paciente es generada al final para facilitar la trazabilidad del proceso.
     response_text = ConversationOrchestrator.respond(
         profile=profile,
         scenario=scenario,
@@ -102,7 +102,7 @@ def converse(
         session.ended_at = datetime.utcnow()
         db.commit()
 
-    # Guardar respuesta del paciente
+    # La respuesta del paciente se guarda al final para que el historial refleje el estado después de aplicar las reglas heurísticas.
     patient_msg = ConversationRepository.add(
         db=db,
         session_id=session.id,
