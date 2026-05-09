@@ -1,15 +1,14 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Generator
 
-class AIClient(ABC):
-    """
-    Contrato que cualquier proveedor de IA debe cumplir.
-    """
 
-    @abstractmethod
-    def generate_response(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        context_messages: list[dict[str, str]] | None = None,
-    ) -> str:
-        pass
+@dataclass
+class AIResponse:
+    """
+    Resultado estandarizado de cualquier llamada a un proveedor de IA.
+    Encapsula contenido, métricas de consumo y trazabilidad de proveedor.
+    """
+    content: str
+    provider: str
+    

@@ -1,8 +1,12 @@
+from app.services.ai.base import AIResponse
 from app.services.ai.factory import get_ai_client
+
 
 class ConversationOrchestrator:
     """
     Orquesta el comportamiento verbal del paciente simulado.
+    Devuelve AIResponse completo para que la ruta pueda registrar
+    métricas reales (proveedor, tokens, latencia) en la base de datos.
     """
 
     @staticmethod
@@ -16,14 +20,24 @@ class ConversationOrchestrator:
         max_sentences: int = 3,
         should_rotate_focus: bool = False,
         category: str = "neutral",
-    ) -> str:
+    ) -> AIResponse:
 
-        fallback = ConversationOrchestrator._fallback_reactive_response(
+        fallback_text = ConversationOrchestrator._fallback_reactive_response(
             response_mode=response_mode,
             current_severity=current_severity,
         )
-        if fallback:
-            return fallback
+        if fallback_text:
+            # Las respuestas de fallback son determinísticas: no consumen tokens ni latencia real.
+            from app.services.ai.base import AIResponse as _AIResponse
+            from app.core.config import AI_PROVIDER
+            return _AIResponse(
+                content=fallback_text,
+                provider="deterministic",
+                model="fallback",
+                tokens_input=0,
+                tokens_output=0,
+                latency_ms=0.0,
+            )
 
         # 🔹 Modulación mínima por severidad
         if current_severity >= 4:
@@ -206,43 +220,26 @@ class ConversationOrchestrator:
 
         ai = get_ai_client()
         context_messages = ConversationOrchestrator._build_context_messages(conversation_history)
+        # Devuelve AIResponse completo con métricas para que la ruta las persista
         return ai.generate_response(system_prompt, user_input, context_messages=context_messages)
 
     @staticmethod
-    def _fallback_reactive_response(response_mode: str, current_severity: int) -> str | None:
-        """Respuestas determinísticas para asegurar reacción inmediata en casos críticos."""
-        if response_mode == "crisis" and current_severity >= 5:
-            return "Me siento totalmente desbordada y ya no puedo sostener esta conversación ahora. Necesito parar en este momento."
-
-        if response_mode == "boundary":
-            if current_severity >= 3:
-                return "No me hables así, eso me cae muy mal. Si quieres seguir, háblame con respeto."
-            return "Prefiero que no me insultes. Me hace sentir peor y así no puedo hablar bien."
-
-        if response_mode == "defensive" and current_severity >= 4:
-            return "Eso me lastima y me pone a la defensiva. Si me hablas así, siento que todo empeora."
-
-        return None
-
-    @staticmethod
-    def _build_context_messages(conversation_history: list | None) -> list[dict[str, str]]:
-        """Mapea historial de BD a roles de chat manteniendo el contexto completo."""
-        if not conversation_history:
-            return []
-
-        role_map = {
-            "trainee": "user",
-            "patient": "assistant",
-            "user": "user",
-            "assistant": "assistant",
-        }
-
-        mapped_messages: list[dict[str, str]] = []
-        for message in conversation_history:
-            role = role_map.get(getattr(message, "role", None), "user")
-            content = (getattr(message, "content", "") or "").strip()
-            if not content:
-                continue
-            mapped_messages.append({"role": role, "content": content})
-
-        return mapped_messages
+    def build_prompt(
+        profile,
+        scenario,
+        current_severity: int,
+        response_mode: str = "neutral",
+        max_sentences: int = 3,
+        should_rotate_focus: bool = False,
+        category: str = "neutral",
+    ) -> tuple[str, str]:
+        """
+        Construye y retorna (system_prompt, severity_label) sin ejecutar la llamada a la IA.
+        Permite que el endpoint de streaming construya el prompt antes de abrir el generator.
+        """
+        if current_severity >= 4:
+            severity_block = "Tu malestar es intenso. Te cuesta organizar lo que sientes y hablas desde la carga emocional inmediata."
+        elif current_severity == 3:
+            severity_block = "Sigues sintiéndote mal, pero empiezas a reflexionar un poco más. Hay ambivalencia: una parte quiere hablar y otra se siente cansada."
+        elif current_severity in (1, 2):
+            severity_block = "Te sientes algo más tranquilo y 

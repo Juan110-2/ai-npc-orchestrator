@@ -42,8 +42,8 @@ class HeuristicDecision:
 class ConversationHeuristics:
     """Reglas rápidas y determinísticas para clasificar un turno y ajustar estado."""
 
-    MIN_SEVERITY = 1
-    MAX_SEVERITY = 5
+    MIN_SEVERITY = 0   # 0 = paciente calmado, sesión puede cerrar
+    MAX_SEVERITY = 5   # 5 = crisis, sesión cierra automáticamente
 
     CATEGORY_PRIORITY = (
         MessageCategory.RISK,
@@ -194,5 +194,4 @@ class ConversationHeuristics:
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized
 
-    def _clamp(self, value: int) -> int:
-        return max(self.MIN_SEVERITY, min(self.MAX_SEVERITY, int(value)))
+    def _clamp(self, v

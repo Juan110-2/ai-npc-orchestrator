@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
+
 from app.models.conversation_message import ConversationMessage
+
 
 class ConversationRepository:
 
@@ -11,9 +13,14 @@ class ConversationRepository:
         content: str,
         severity: int,
         risk_flags: list,
-        ai_provider: str = None,
-        tokens_used: int = None
-    ):
+        # Métricas de IA — solo se envían para mensajes del paciente
+        ai_provider: str | None = None,
+        ai_model: str | None = None,
+        tokens_input: int | None = None,
+        tokens_output: int | None = None,
+        tokens_used: int | None = None,
+        latency_ms: float | None = None,
+    ) -> ConversationMessage:
         msg = ConversationMessage(
             session_id=session_id,
             role=role,
@@ -21,7 +28,11 @@ class ConversationRepository:
             severity=severity,
             risk_flags=risk_flags,
             ai_provider=ai_provider,
-            tokens_used=tokens_used
+            ai_model=ai_model,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            tokens_used=tokens_used,
+            latency_ms=latency_ms,
         )
         db.add(msg)
         db.commit()
@@ -29,21 +40,8 @@ class ConversationRepository:
         return msg
 
     @staticmethod
-    def list_by_session(db: Session, session_id):
+    def list_by_session(db: Session, session_id) -> list[ConversationMessage]:
         return (
             db.query(ConversationMessage)
             .filter(ConversationMessage.session_id == session_id)
-            .order_by(ConversationMessage.created_at.asc())
-            .all()
-        )
-
-    @staticmethod
-    def list_recent_by_session(db: Session, session_id, limit: int = 12):
-        rows = (
-            db.query(ConversationMessage)
-            .filter(ConversationMessage.session_id == session_id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        return list(reversed(rows))
+            .order_by(ConversationMessage.created_at.asc()
