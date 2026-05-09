@@ -1,8 +1,9 @@
-from app.services.ai.local_mock import LocalMockAIClient
-from app.services.ai.openai_client import OpenAIClient
 from app.core.config import AI_PROVIDER
+from app.services.ai.base import AIClient
 
-def get_ai_client():
-    if AI_PROVIDER == "openai":
-        return OpenAIClient()
-    return LocalMockAIClient()
+
+def get_ai_client() -> AIClient:
+    """
+    Factory de clientes de IA.
+    El proveedor activo se controla con la variable de entorno AI_PROVIDER.
+    La validación del valor ya ocurre en c

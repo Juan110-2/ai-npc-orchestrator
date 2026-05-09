@@ -1,7 +1,9 @@
+# Web framework
 fastapi
 uvicorn[standard]
+
+# Base de datos
 sqlalchemy
 psycopg2-binary
-python-dotenv
-pydantic
-openai
+
+# U
