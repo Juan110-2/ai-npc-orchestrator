@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 import re
 import unicodedata
-from typing import Tuple
+from typing import Optional, Tuple
+from uuid import UUID
+
+from sqlalchemy.orm import Session
 
 from app.services.turn_classifier import TurnClassifier
 
@@ -58,9 +61,18 @@ class ConversationHeuristics:
     def __init__(self) -> None:
         self.turn_classifier = TurnClassifier()
 
-    def decide(self, user_text: str, current_severity: int) -> HeuristicDecision:
+    def decide(
+        self,
+        user_text: str,
+        current_severity: int,
+        *,
+        db: Optional[Session] = None,
+        session_id: Optional[UUID] = None,
+    ) -> HeuristicDecision:
         normalized = self._normalize(user_text)
-        category, matched_rules, confidence = self._classify(normalized)
+        category, matched_rules, confidence = self._classify(
+            normalized, db=db, session_id=session_id
+        )
         return self._apply_rules(
             category,
             current_severity,
@@ -69,11 +81,19 @@ class ConversationHeuristics:
             confidence,
         )
 
-    def _classify(self, normalized_text: str) -> Tuple[MessageCategory, Tuple[str, ...], float]:
+    def _classify(
+        self,
+        normalized_text: str,
+        *,
+        db: Optional[Session] = None,
+        session_id: Optional[UUID] = None,
+    ) -> Tuple[MessageCategory, Tuple[str, ...], float]:
         if not normalized_text:
             return MessageCategory.CONFUSING, ("empty_message",), 0.0
 
-        semantic = self.turn_classifier.classify(normalized_text)
+        semantic = self.turn_classifier.classify(
+            normalized_text, db=db, session_id=session_id
+        )
         if semantic:
             try:
                 category = MessageCategory(semantic.category)
@@ -194,4 +214,5 @@ class ConversationHeuristics:
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized
 
-    def _clamp(self, v
+    def _clamp(self, value: int) -> int:
+        return max(self.MIN_SEVERITY, min(self.MAX_SEVERITY, int(value)))

@@ -44,4 +44,20 @@ class ConversationRepository:
         return (
             db.query(ConversationMessage)
             .filter(ConversationMessage.session_id == session_id)
-            .order_by(ConversationMessage.created_at.asc()
+            .order_by(ConversationMessage.created_at.asc())
+            .all()
+        )
+
+    @staticmethod
+    def list_recent_by_session(
+        db: Session, session_id, limit: int = 12
+    ) -> list[ConversationMessage]:
+        """Devuelve los últimos N mensajes ordenados cronológicamente (útil para contexto de IA)."""
+        rows = (
+            db.query(ConversationMessage)
+            .filter(ConversationMessage.session_id == session_id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return list(reversed(rows))
