@@ -39,7 +39,7 @@ class SessionRepository:
 
     @staticmethod
     def list_by_user(db: Session, user_id: UUID, limit: int = 50) -> list[SessionModel]:
-        """Devuelve las sesiones de un usuario específico, ordenadas por fecha descendente."""
+        """Devuelve las sesiones de un usuario especifico, ordenadas por fecha descendente."""
         return (
             db.query(SessionModel)
             .filter(SessionModel.user_id == user_id)

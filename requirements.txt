@@ -6,4 +6,13 @@ uvicorn[standard]
 sqlalchemy
 psycopg2-binary
 
-# U
+# Utilidades
+python-dotenv
+pydantic
+
+# Clientes de IA
+openai                        # OpenAI + DeepSeek (API compatible)
+google-generativeai           # Google Gemini
+
+# Autenticación JWT (Supabase)
+python-jose[cryptography]

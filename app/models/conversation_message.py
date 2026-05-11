@@ -16,8 +16,16 @@ class ConversationMessage(Base):
     role = Column(Text, nullable=False)
     content = Column(Text, nullable=False)
 
-    # Estado emocional en el momento del turno (rango 0–5)
+    # Estado emocional en el momento del turno (rango 0-5)
     severity = Column(Integer, nullable=False)
     risk_flags = Column(JSONB, nullable=False, default=list)
 
-    # Métricas de IA �
+    # Metricas de IA - solo se populan en mensajes del paciente (role="patient")
+    ai_provider = Column(Text, nullable=True)
+    ai_model = Column(Text, nullable=True)
+    tokens_input = Column(Integer, nullable=True)
+    tokens_output = Column(Integer, nullable=True)
+    tokens_used = Column(Integer, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
