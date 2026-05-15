@@ -1,22 +1,16 @@
 """
 Endpoints de metricas tecnicas para seleccion de API de IA (Capitulo 3 del TG).
 
-GET /admin/metrics/providers
-    Agregaciones por proveedor/modelo/purpose. Fuente de la matriz comparativa.
-
-GET /admin/metrics/calls
-    Ultimos N logs crudos (auditoria / debugging).
-
 Permisos:
     - admin: lectura total.
-    - teacher: lectura total.
+    - teacher: 403 forbidden.
     - student: 403 forbidden.
     - sin auth (modo dev, SUPABASE_JWT_SECRET no configurado): lectura total.
 """
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -32,16 +26,11 @@ router = APIRouter(prefix="/admin/metrics", tags=["admin-metrics"])
 _security = HTTPBearer(auto_error=False)
 
 
-def _require_admin_or_teacher(
+def _require_admin(
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ) -> Optional[UserProfile]:
-    """
-    Permite acceso a admin y teacher.
-    Si auth esta desactivada (SUPABASE_JWT_SECRET no configurado), deja pasar
-    en modo desarrollo.
-    """
-    # Modo desarrollo: sin secret no validamos nada.
+    """Solo admin. Modo dev (sin SUPABASE_JWT_SECRET) pasa."""
     if not SUPABASE_JWT_SECRET:
         return None
 
@@ -52,10 +41,6 @@ def _require_admin_or_teacher(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Validar JWT y extraer sub
-    from app.core.auth import verify_supabase_jwt
-    # verify_supabase_jwt requiere Request; lo invocamos directo con los creds
-    # Reimplementamos la validacion inline para no acoplar al Request.
     try:
         from jose import jwt
         token = credentials.credentials
@@ -79,25 +64,20 @@ def _require_admin_or_teacher(
     except Exception:
         user = None
 
-    # Cualquier usuario autenticado puede ver las metricas tecnicas.
-    # Si no hay user (token invalido o usuario eliminado), igual devolvemos None
-    # en modo dev. La distincion de "que ve quien" se hace en el frontend.
+    if not user or user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden ver las metricas tecnicas",
+        )
     return user
 
 
 @router.get("/providers")
 def get_provider_metrics(
     db: Session = Depends(get_db),
-    purpose: Optional[str] = Query(
-        default=None,
-        description="Filtrar por purpose (orchestrator|classifier|evaluator|bench|other)",
-    ),
-    _: Optional[UserProfile] = Depends(_require_admin_or_teacher),
+    purpose: Optional[str] = Query(default=None),
+    _: Optional[UserProfile] = Depends(_require_admin),
 ):
-    """
-    Retorna las metricas agregadas por proveedor/modelo/purpose desde la vista
-    public.v_provider_metrics. Filtrable por purpose.
-    """
     where_clause = ""
     params: dict = {}
     if purpose:
@@ -128,31 +108,24 @@ def list_recent_calls(
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=1000),
     provider: Optional[str] = Query(default=None),
-    _: Optional[UserProfile] = Depends(_require_admin_or_teacher),
+    _: Optional[UserProfile] = Depends(_require_admin),
 ):
-    """Ultimos N logs crudos. Util para auditoria y debugging."""
-    if provider:
-        rows = AICallLogsRepository.list_by_provider(db, provider, limit=limit)
-    else:
-        rows = AICallLogsRepository.list_recent(db, limit=limit)
+    rows = (
+        AICallLogsRepository.list_by_provider(db, provider, limit=limit)
+        if provider else AICallLogsRepository.list_recent(db, limit=limit)
+    )
     return [
         {
             "id": str(r.id),
             "session_id": str(r.session_id) if r.session_id else None,
-            "provider": r.provider,
-            "model": r.model,
-            "purpose": r.purpose,
-            "call_mode": r.call_mode,
+            "provider": r.provider, "model": r.model,
+            "purpose": r.purpose, "call_mode": r.call_mode,
             "status": r.status,
-            "tokens_input": r.tokens_input,
-            "tokens_output": r.tokens_output,
-            "latency_ms": r.latency_ms,
-            "ttft_ms": r.ttft_ms,
+            "tokens_input": r.tokens_input, "tokens_output": r.tokens_output,
+            "latency_ms": r.latency_ms, "ttft_ms": r.ttft_ms,
             "json_valid": r.json_valid,
-            "response_chars": r.response_chars,
-            "prompt_chars": r.prompt_chars,
-            "cost_usd": r.cost_usd,
-            "error_detail": r.error_detail,
+            "response_chars": r.response_chars, "prompt_chars": r.prompt_chars,
+            "cost_usd": r.cost_usd, "error_detail": r.error_detail,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows
@@ -162,12 +135,8 @@ def list_recent_calls(
 @router.get("/summary")
 def get_metrics_summary(
     db: Session = Depends(get_db),
-    _: Optional[UserProfile] = Depends(_require_admin_or_teacher),
+    _: Optional[UserProfile] = Depends(_require_admin),
 ):
-    """
-    Resumen ejecutivo en una sola llamada: totales globales + comparativa
-    por proveedor para el dashboard de admin.
-    """
     totals = db.execute(text("""
         select
             count(*)::int                                          as total_calls,

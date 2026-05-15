@@ -30,6 +30,7 @@ class AICallLog(Base):
     purpose = Column(Text, nullable=False)
     call_mode = Column(Text, nullable=False, default="sync")
     status = Column(Text, nullable=False)
+    category = Column(Text, nullable=True)
     error_detail = Column(Text, nullable=True)
 
     tokens_input = Column(Integer, nullable=True)

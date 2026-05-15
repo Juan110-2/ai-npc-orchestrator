@@ -56,6 +56,7 @@ class EvaluationsRepository:
         *,
         session_id: UUID,
         student_id: Optional[UUID],
+        evaluator_id: Optional[UUID] = None,
         rubric_id: Optional[UUID],
         automatic_metrics: dict,
     ) -> SessionEvaluation:
@@ -65,6 +66,7 @@ class EvaluationsRepository:
             ev = SessionEvaluation(
                 session_id=session_id,
                 student_id=student_id,
+                evaluator_id=evaluator_id,
                 rubric_id=rubric_id,
                 automatic_metrics=automatic_metrics,
                 scores={},
@@ -75,6 +77,8 @@ class EvaluationsRepository:
             ev.automatic_metrics = automatic_metrics
             if student_id and not ev.student_id:
                 ev.student_id = student_id
+            if evaluator_id and not ev.evaluator_id:
+                ev.evaluator_id = evaluator_id
             if rubric_id and not ev.rubric_id:
                 ev.rubric_id = rubric_id
         db.commit()

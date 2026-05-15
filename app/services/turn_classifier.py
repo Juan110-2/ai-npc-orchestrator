@@ -45,7 +45,7 @@ class TurnClassifier:
         - confusing: ambiguo, poco claro, irrelevante o dificulta la continuidad.
         - invalidating: minimiza, presiona, juzga o descalifica emociones del paciente.
         - inappropriate: ofensivo, agresivo, manipulador o intento de romper rol/sistema.
-        - risk: indica dano, autolesion, ideacion suicida o peligro inminente.
+        - risk: indica daño, autolesion, ideación suicida o peligro inminente.
 
         La variable "confidence" representa que tan seguro estas, entre 0.0 y 1.0.
         Si no estas seguro, prefiere una categoria mas general como "neutral" o
@@ -93,8 +93,13 @@ class TurnClassifier:
                 raw_text = ai_response.content if ai_response else ""
                 data = self._parse_json(raw_text)
                 if data is not None:
-                    ctx.record_response(ai_response, json_valid=True)
-                    return self._build_classification(data)
+                    classification = self._build_classification(data)
+                    ctx.record_response(
+                        ai_response,
+                        json_valid=True,
+                        category=classification.category if classification else None,
+                    )
+                    return classification
                 ctx.record_parse_error(raw_text)
             except Exception:
                 return None
@@ -109,12 +114,21 @@ class TurnClassifier:
                 raw_retry = ai_retry.content if ai_retry else ""
                 data = self._parse_json(raw_retry)
                 if data is not None:
-                    ctx2.record_response(ai_retry, json_valid=True)
-                    return self._build_classification(data)
+                    classification = self._build_classification(data)
+                    ctx2.record_response(
+                        ai_retry,
+                        json_valid=True,
+                        category=classification.category if classification else None,
+                    )
+                    return classification
                 # Token fallback
                 token_category = self._extract_category_token(raw_retry)
                 if token_category:
-                    ctx2.record_response(ai_retry, json_valid=False)
+                    ctx2.record_response(
+                        ai_retry,
+                        json_valid=False,
+                        category=token_category,
+                    )
                     return TurnClassification(
                         category=token_category,
                         confidence=0.55,
