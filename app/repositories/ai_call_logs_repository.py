@@ -16,11 +16,11 @@ from app.models.ai_call_log import AICallLog
 _INSERT_SQL = text("""
     insert into public.ai_call_logs (
         id, session_id, provider, model, purpose, call_mode, status,
-        error_detail, tokens_input, tokens_output, latency_ms, ttft_ms,
+        category, error_detail, tokens_input, tokens_output, latency_ms, ttft_ms,
         json_valid, response_chars, prompt_chars, cost_usd
     ) values (
         :id, :session_id, :provider, :model, :purpose, :call_mode, :status,
-        :error_detail, :tokens_input, :tokens_output, :latency_ms, :ttft_ms,
+        :category, :error_detail, :tokens_input, :tokens_output, :latency_ms, :ttft_ms,
         :json_valid, :response_chars, :prompt_chars, :cost_usd
     )
 """)
@@ -35,6 +35,7 @@ class AICallLogsRepository:
         model: str,
         purpose: str,
         status: str,
+        category: Optional[str] = None,
         call_mode: str = "sync",
         session_id: Optional[UUID] = None,
         tokens_input: Optional[int] = None,
@@ -58,6 +59,7 @@ class AICallLogsRepository:
                 "purpose": purpose,
                 "call_mode": call_mode,
                 "status": status,
+                "category": category,
                 "error_detail": error_detail,
                 "tokens_input": tokens_input,
                 "tokens_output": tokens_output,

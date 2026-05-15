@@ -16,6 +16,16 @@ class UsersRepository:
         )
 
     @staticmethod
+    def list_by_role(db: Session, role: str, limit: int = 200) -> list[UserProfile]:
+        return (
+            db.query(UserProfile)
+            .filter(UserProfile.role == role)
+            .order_by(UserProfile.full_name)
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
     def get_by_id(db: Session, user_id: UUID) -> UserProfile | None:
         return db.query(UserProfile).filter(UserProfile.id == user_id).first()
 

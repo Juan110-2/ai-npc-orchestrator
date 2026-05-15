@@ -94,6 +94,105 @@ def _get_hs256_secret() -> str | bytes:
         return SUPABASE_JWT_SECRET
 
 
+def _decode_and_verify_token(token: str) -> dict:
+    from jose import jwt, jwk
+
+    header = jwt.get_unverified_header(token)
+    alg = header.get("alg")
+    kid = header.get("kid")
+
+    if not alg:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token sin algoritmo",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    unverified = jwt.get_unverified_claims(token)
+    issuer = unverified.get("iss")
+
+    # 1) Tokens asimetricos modernos: ES256 / RS256 / etc.
+    if alg in ASYMMETRIC_ALGS:
+        expected_issuer = SUPABASE_JWT_ISSUER or issuer
+        jwks_url = SUPABASE_JWKS_URL or (
+            f"{issuer.rstrip('/')}/.well-known/jwks.json" if issuer else None
+        )
+
+        if not expected_issuer:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Issuer no disponible",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not jwks_url or not kid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token sin JWKS URL o kid",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        jwk_key = _get_jwk_for_kid(jwks_url, kid)
+        if not jwk_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No se encontro la clave publica para el token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        public_key = jwk.construct(jwk_key, algorithm=alg).to_pem().decode("utf-8")
+
+        return jwt.decode(
+            token,
+            public_key,
+            algorithms=[alg],
+            issuer=expected_issuer,
+            options={"verify_aud": False},
+        )
+
+    # 2) Compatibilidad temporal con legacy HS256
+    if alg == "HS256":
+        secret = _get_hs256_secret()
+        return jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=f"Algoritmo JWT no soportado: {alg}",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def verify_supabase_token(token: str) -> dict:
+    try:
+        return _decode_and_verify_token(token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        issuer = None
+        alg = None
+        try:
+            from jose import jwt
+
+            header = jwt.get_unverified_header(token)
+            claims = jwt.get_unverified_claims(token)
+            alg = header.get("alg")
+            issuer = claims.get("iss")
+        except Exception:
+            pass
+
+        logger.warning("[auth] JWT decode failed: %s; alg=%s; iss=%s", exc, alg, issuer)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token invalido o expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 async def verify_supabase_jwt(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
@@ -105,98 +204,4 @@ async def verify_supabase_jwt(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    try:
-        from jose import jwt, jwk
-
-        token = credentials.credentials
-        header = jwt.get_unverified_header(token)
-        alg = header.get("alg")
-        kid = header.get("kid")
-
-        if not alg:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token sin algoritmo",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        unverified = jwt.get_unverified_claims(token)
-        issuer = unverified.get("iss")
-
-        # 1) Tokens asimétricos modernos: ES256 / RS256 / etc.
-        if alg in ASYMMETRIC_ALGS:
-            expected_issuer = SUPABASE_JWT_ISSUER or issuer
-            jwks_url = SUPABASE_JWKS_URL or (
-                f"{issuer.rstrip('/')}/.well-known/jwks.json" if issuer else None
-            )
-
-            if not expected_issuer:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Issuer no disponible",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            if not jwks_url or not kid:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token sin JWKS URL o kid",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            jwk_key = _get_jwk_for_kid(jwks_url, kid)
-            if not jwk_key:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="No se encontró la clave pública para el token",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-
-            public_key = jwk.construct(jwk_key, algorithm=alg).to_pem().decode("utf-8")
-
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=[alg],
-                issuer=expected_issuer,
-                options={"verify_aud": False},
-            )
-            return payload
-
-        # 2) Compatibilidad temporal con legacy HS256
-        if alg == "HS256":
-            secret = _get_hs256_secret()
-            payload = jwt.decode(
-                token,
-                secret,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
-            )
-            return payload
-
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Algoritmo JWT no soportado: {alg}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        issuer = None
-        alg = None
-        try:
-            from jose import jwt
-            header = jwt.get_unverified_header(credentials.credentials)
-            claims = jwt.get_unverified_claims(credentials.credentials)
-            alg = header.get("alg")
-            issuer = claims.get("iss")
-        except Exception:
-            pass
-
-        logger.warning("[auth] JWT decode failed: %s; alg=%s; iss=%s", exc, alg, issuer)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido o expirado",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return verify_supabase_token(credentials.credentials)

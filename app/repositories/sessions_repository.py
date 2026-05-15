@@ -12,12 +12,14 @@ class SessionRepository:
         profile_id,
         scenario,
         user_id: UUID | None = None,
+        assigned_by: UUID | None = None,
     ) -> SessionModel:
         session = SessionModel(
             profile_id=profile_id,
             scenario_id=scenario.id,
             current_severity=scenario.severity,
             user_id=user_id,
+            assigned_by=assigned_by,
         )
         db.add(session)
         db.commit()
@@ -39,10 +41,21 @@ class SessionRepository:
 
     @staticmethod
     def list_by_user(db: Session, user_id: UUID, limit: int = 50) -> list[SessionModel]:
-        """Devuelve las sesiones de un usuario especifico, ordenadas por fecha descendente."""
+        """Sesiones asignadas a un estudiante especifico."""
         return (
             db.query(SessionModel)
             .filter(SessionModel.user_id == user_id)
+            .order_by(SessionModel.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def list_by_assigned_by(db: Session, assigned_by: UUID, limit: int = 50) -> list[SessionModel]:
+        """Sesiones creadas/asignadas por un profesor especifico."""
+        return (
+            db.query(SessionModel)
+            .filter(SessionModel.assigned_by == assigned_by)
             .order_by(SessionModel.started_at.desc())
             .limit(limit)
             .all()

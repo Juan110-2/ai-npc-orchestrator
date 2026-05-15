@@ -15,6 +15,23 @@ from app.schemas.users import UserProfileResponse, UserProfileUpdate
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _require_teacher_or_admin(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(verify_supabase_jwt),
+) -> UserProfile:
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Se requiere autenticación")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin sub")
+
+    user = UsersRepository.get_by_id(db, UUID(user_id))
+    if not user or user.role not in ("teacher", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Se requiere rol teacher o admin")
+    return user
+
+
 def _require_admin(
     db: Session = Depends(get_db),
     payload: dict | None = Depends(verify_supabase_jwt),
@@ -100,3 +117,12 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
 
     return updated
+
+
+@router.get("/students", response_model=list[UserProfileResponse])
+def list_students(
+    db: Session = Depends(get_db),
+    _caller: UserProfile = Depends(_require_teacher_or_admin),
+):
+    """Lista todos los usuarios con rol student. Accesible para teacher y admin."""
+    return UsersRepository.list_by_role(db, role="student")

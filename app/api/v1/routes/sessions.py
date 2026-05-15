@@ -3,42 +3,80 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime, timezone
 
-from app.api.v1.deps import get_db
+from app.api.v1.deps import get_db, optional_jwt
 from app.schemas.sessions import SessionCreate, SessionResponse
 from app.repositories.sessions_repository import SessionRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.scenario_repository import ScenarioRepository
+from app.repositories.users_repository import UsersRepository
 from app.services.evaluation_service import run_auto_evaluation
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
+def _list_sessions_for_caller(db: Session, payload: dict | None, limit: int = 50):
+    """Filtra sesiones según el rol del caller."""
+    if payload is None:
+        return SessionRepository.list_recent(db, limit=limit)
+
+    user_id = UUID(payload["sub"])
+    user = UsersRepository.get_by_id(db, user_id)
+
+    if not user or user.role == "admin":
+        return SessionRepository.list_recent(db, limit=limit)
+    if user.role == "teacher":
+        return SessionRepository.list_by_assigned_by(db, user_id, limit=limit)
+    # student
+    return SessionRepository.list_by_user(db, user_id, limit=limit)
+
+
 @router.get("/", response_model=list[SessionResponse])
-def list_sessions(db: Session = Depends(get_db)):
-    return SessionRepository.list_recent(db, limit=50)
+def list_sessions(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(optional_jwt),
+):
+    return _list_sessions_for_caller(db, payload)
 
 
 @router.get("/list", response_model=list[SessionResponse])
-def list_sessions_explicit(db: Session = Depends(get_db)):
-    """Alias explicito para evitar problemas de routing con slash final."""
-    return SessionRepository.list_recent(db, limit=50)
+def list_sessions_explicit(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(optional_jwt),
+):
+    return _list_sessions_for_caller(db, payload)
 
 
 @router.get("/active", response_model=list[SessionResponse])
-def list_active_sessions(db: Session = Depends(get_db)):
-    sessions = SessionRepository.list_recent(db, limit=100)
-    return [item for item in sessions if not item.ended_at]
+def list_active_sessions(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(optional_jwt),
+):
+    sessions = _list_sessions_for_caller(db, payload, limit=100)
+    return [s for s in sessions if not s.ended_at]
 
 
 @router.post("/start", response_model=SessionResponse)
-def start_session(payload: SessionCreate, db: Session = Depends(get_db)):
-    profile = ProfileRepository.get_by_id(db, payload.profile_id)
-    scenario = ScenarioRepository.get_by_id(db, payload.scenario_id)
+def start_session(
+    payload_data: SessionCreate,
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(optional_jwt),
+):
+    profile = ProfileRepository.get_by_id(db, payload_data.profile_id)
+    scenario = ScenarioRepository.get_by_id(db, payload_data.scenario_id)
 
     if not profile or not scenario:
         raise HTTPException(status_code=404, detail="Profile or Scenario not found")
 
-    return SessionRepository.start(db, profile.id, scenario, user_id=payload.user_id)
+    caller_id = UUID(payload["sub"]) if payload else None
+
+    assigned_by = payload_data.assigned_by or caller_id
+    user_id = payload_data.user_id or caller_id
+
+    return SessionRepository.start(
+        db, profile.id, scenario,
+        user_id=user_id,
+        assigned_by=assigned_by,
+    )
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
@@ -68,11 +106,9 @@ def end_session(
     session.ended_at = datetime.now(timezone.utc)
     db.commit()
 
-    # Best-effort: si falla el calculo automatico no rompe el cierre de sesion
     try:
         run_auto_evaluation(db, session.id)
     except Exception as exc:
-        # No bloqueamos al usuario; el docente podra dispararla manualmente.
         print(f"[sessions.end] run_auto_evaluation fallo: {type(exc).__name__}: {exc}")
 
     return {

@@ -53,16 +53,29 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
             (base["ended_at"] - base["started_at"]).total_seconds() / 60.0
         )
 
-    # Categorias detectadas para los turnos del estudiante. Las categorias
-    # vienen del clasificador y se infieren del log: usamos ai_call_logs filtrado
-    # por session_id y purpose='classifier'. No es perfecto pero es trazable.
-    cat_rows = db.execute(text("""
+    # Estados tecnicos del clasificador (ok, parse_error, etc.).
+    status_rows = db.execute(text("""
         select status, count(*)::int as n
         from public.ai_call_logs
         where session_id = :sid and purpose = 'classifier'
         group by status
     """), {"sid": str(session_id)}).mappings().all()
-    classifier_calls = {r["status"]: r["n"] for r in cat_rows}
+    classifier_calls_by_status = {r["status"]: r["n"] for r in status_rows}
+
+    # Categorias reales del clasificador (si el log las tiene).
+    classifier_calls_by_category: dict[str, int] = {}
+    try:
+        category_rows = db.execute(text("""
+            select category, count(*)::int as n
+            from public.ai_call_logs
+            where session_id = :sid
+              and purpose = 'classifier'
+              and category is not null
+            group by category
+        """), {"sid": str(session_id)}).mappings().all()
+        classifier_calls_by_category = {r["category"]: r["n"] for r in category_rows}
+    except Exception:
+        classifier_calls_by_category = {}
 
     # Conteo de turnos por response_mode (lo que decidio la heuristica).
     # Como no esta persistido, lo recalculamos directo de risk_flags + severidad.
@@ -85,7 +98,8 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
         "severity_peak": int(base["severity_peak"]) if base["severity_peak"] is not None else None,
         "severity_final": int(base["severity_final"]) if base["severity_final"] is not None else None,
         "risk_alerts_detected": int(risk_alerts or 0),
-        "classifier_calls_by_status": classifier_calls,
+        "classifier_calls_by_status": classifier_calls_by_status,
+        "classifier_calls_by_category": classifier_calls_by_category,
     }
 
 
@@ -129,6 +143,7 @@ def run_auto_evaluation(db: Session, session_id: UUID):
         db,
         session_id=session_id,
         student_id=getattr(session, "user_id", None),
+        evaluator_id=getattr(session, "assigned_by", None),
         rubric_id=rubric.id if rubric else None,
         automatic_metrics=metrics,
     )

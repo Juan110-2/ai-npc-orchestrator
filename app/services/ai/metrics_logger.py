@@ -73,6 +73,7 @@ class CallContext:
     _ttft_ms: Optional[float] = None
     _json_valid: Optional[bool] = None
     _response_chars: Optional[int] = None
+    _category: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.purpose not in ALLOWED_PURPOSES:
@@ -88,6 +89,7 @@ class CallContext:
         ai_response: AIResponse,
         *,
         json_valid: Optional[bool] = None,
+        category: Optional[str] = None,
     ) -> None:
         self._status = "ok"
         self._tokens_input = ai_response.tokens_input
@@ -95,6 +97,7 @@ class CallContext:
         self._latency_ms = ai_response.latency_ms
         self._response_chars = len(ai_response.content or "")
         self._json_valid = json_valid
+        self._category = category
 
     def record_stream_result(
         self,
@@ -102,6 +105,7 @@ class CallContext:
         accumulated_text: str,
         *,
         json_valid: Optional[bool] = None,
+        category: Optional[str] = None,
     ) -> None:
         self._status = "ok"
         self._tokens_input = stream_result.tokens_input
@@ -110,6 +114,7 @@ class CallContext:
         self._ttft_ms = stream_result.ttft_ms
         self._response_chars = len(accumulated_text or "")
         self._json_valid = json_valid
+        self._category = category
 
     def record_error(self, exc: BaseException) -> None:
         self._status = _classify_exception(exc)
@@ -178,6 +183,7 @@ def _persist(ctx: CallContext) -> None:
             call_mode=ctx.call_mode,
             status=ctx._status,
             error_detail=ctx._error_detail,
+            category=ctx._category,
             session_id=ctx.session_id,
             tokens_input=ctx._tokens_input,
             tokens_output=ctx._tokens_output,

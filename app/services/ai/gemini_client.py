@@ -48,7 +48,8 @@ class GeminiClient(AIClient):
             for msg in context_messages:
                 role = "user" if msg.get("role") == "user" else "model"
                 contents.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
-        contents.append({"role": "user", "parts": [{"text": user_prompt}]})
+        else:
+            contents.append({"role": "user", "parts": [{"text": user_prompt}]})
         return contents
 
     def generate_response(

@@ -73,12 +73,17 @@ class ConversationHeuristics:
         category, matched_rules, confidence = self._classify(
             normalized, db=db, session_id=session_id
         )
+        
+        # NUEVO: Detectar si hay pregunta pendiente
+        has_question = self._has_open_question(user_text)
+        
         return self._apply_rules(
             category,
             current_severity,
             normalized,
             matched_rules,
             confidence,
+            has_question=has_question,  # NUEVO: pasar como parámetro
         )
 
     def _classify(
@@ -123,6 +128,7 @@ class ConversationHeuristics:
         normalized_text: str,
         matched_rules: Tuple[str, ...],
         confidence: float,
+        has_question: bool = False,  # NUEVO: parámetro
     ) -> HeuristicDecision:
         severity = self._clamp(current_severity)
         confidence = max(0.0, min(1.0, float(confidence)))
@@ -136,12 +142,14 @@ class ConversationHeuristics:
         if category == MessageCategory.SUPPORTIVE:
             # No bajar severidad de forma automatica por un solo turno de apoyo.
             # Exigimos una senal semantica relativamente fuerte.
-            if confidence >= 0.82 and len(normalized_text) >= 10 and severity >= 2:
+            if confidence >= 0.82 and len(normalized_text) >= 10 and severity >= 1:
                 next_severity = self._clamp(severity - 1)
             else:
                 next_severity = severity
             response_mode = ResponseMode.EMPATHIC
-            if next_severity <= 1 and confidence >= 0.9:
+            
+            # CAMBIO CRITICO: Solo cerrar si NO hay pregunta pendiente
+            if next_severity < 1 and confidence >= 0.9 and not has_question:
                 should_close = True
 
         elif category == MessageCategory.INDIFFERENT:
@@ -203,6 +211,35 @@ class ConversationHeuristics:
             max_sentences=max_sentences,
             matched_rules=tuple(matched_rules),
         )
+
+    @staticmethod
+    def _has_open_question(user_input: str) -> bool:
+        """
+        NUEVO: Detecta si el input del estudiante contiene una pregunta abierta
+        que requiere respuesta sustancial.
+        """
+        # Detectar signos de interrogacion
+        if "?" in user_input or "¿" in user_input:
+            # Excluir preguntas retoricas que NO esperan respuesta
+            rhetorical_patterns = [
+                "¿verdad?", "¿no?", "¿cierto?", "¿ok?", 
+                "¿está bien?", "¿entiendes?", "¿me sigues?"
+            ]
+            lower_input = user_input.lower()
+            if any(pattern in lower_input for pattern in rhetorical_patterns):
+                return False
+            return True
+        
+        # Detectar patrones de pregunta abierta sin signos de interrogacion
+        question_words = [
+            "cómo", "qué", "cuál", "por qué", "cuándo", "dónde", "quién",
+            "como", "que", "cual", "cuando", "donde", "quien"
+        ]
+        words = user_input.lower().split()
+        if any(word in words for word in question_words):
+            return True
+        
+        return False
 
     @staticmethod
     def _normalize(text: str) -> str:

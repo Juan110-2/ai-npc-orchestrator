@@ -283,7 +283,10 @@ def converse_stream(
 
     def _stream_generator():
         accumulated = ""
-        provider, model = "deterministic", "fallback" if forced_text and not should_close else ("deterministic", "closing")
+        if forced_text:
+            provider, model = "deterministic", "fallback"
+        else:
+            provider, model = "unknown", "unknown"
         tokens_input = tokens_output = 0
         latency_ms = ttft_ms = 0.0
 
