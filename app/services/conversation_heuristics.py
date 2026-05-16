@@ -73,17 +73,24 @@ class ConversationHeuristics:
         category, matched_rules, confidence = self._classify(
             normalized, db=db, session_id=session_id
         )
-        
-        # NUEVO: Detectar si hay pregunta pendiente
+
         has_question = self._has_open_question(user_text)
-        
+
+        # Tres o más preguntas en un mismo turno saturan al paciente: se siente
+        # interrogado, no escuchado. Dos preguntas puede ser natural; tres o más
+        # indica una técnica pobre y sobreescribimos SUPPORTIVE a CONFUSING.
+        if category == MessageCategory.SUPPORTIVE and self._count_questions(user_text) >= 3:
+            category = MessageCategory.CONFUSING
+            matched_rules = matched_rules + ("override:multiple_questions",)
+            confidence = 0.5
+
         return self._apply_rules(
             category,
             current_severity,
             normalized,
             matched_rules,
             confidence,
-            has_question=has_question,  # NUEVO: pasar como parámetro
+            has_question=has_question,
         )
 
     def _classify(
@@ -140,21 +147,16 @@ class ConversationHeuristics:
         max_sentences = 3
 
         if category == MessageCategory.SUPPORTIVE:
-            # No bajar severidad de forma automatica por un solo turno de apoyo.
-            # Exigimos una senal semantica relativamente fuerte.
-            if confidence >= 0.82 and len(normalized_text) >= 10 and severity >= 1:
-                next_severity = self._clamp(severity - 1)
-            else:
-                next_severity = severity
+            # La heurística ya NO baja la severidad automáticamente.
+            # El evaluador de intervenciones (IA paralela) es quien decide si
+            # el apoyo fue lo suficientemente bueno para reducirla (-1) o no (0).
+            # Así se requiere calidad sostenida, no solo intención positiva.
+            next_severity = severity
             response_mode = ResponseMode.EMPATHIC
-            
-            # CAMBIO CRITICO: Solo cerrar si NO hay pregunta pendiente
-            if next_severity < 1 and confidence >= 0.9 and not has_question:
-                should_close = True
 
         elif category == MessageCategory.INDIFFERENT:
             # La indiferencia no contiene: con malestar medio-alto tiende a empeorar.
-            next_severity = self._clamp(severity + 1 if severity >= 3 else severity)
+            next_severity = self._clamp(severity + 0.5 if severity >= 3 else severity)
             response_mode = ResponseMode.DEFENSIVE if severity >= 3 else ResponseMode.CLARIFY
             max_sentences = 2
 
@@ -169,19 +171,19 @@ class ConversationHeuristics:
             max_sentences = 2
 
         elif category == MessageCategory.INVALIDATING:
-            next_severity = self._clamp(severity + 1)
+            next_severity = self._clamp(severity + 0.5)
             response_mode = ResponseMode.DEFENSIVE
             max_sentences = 2
 
         elif category == MessageCategory.INAPPROPRIATE:
-            next_severity = self._clamp(severity + 1)
+            next_severity = self._clamp(severity + 0.5)
             should_rotate_focus = True
             # Si ya hay malestar alto, responde con más carga emocional.
             response_mode = ResponseMode.DEFENSIVE if severity >= 4 else ResponseMode.BOUNDARY
             max_sentences = 2
 
         elif category == MessageCategory.RISK:
-            next_severity = self._clamp(max(severity + 1, 4))
+            next_severity = self._clamp(max(severity + 0.5, 4.0))
             response_mode = ResponseMode.CRISIS
             max_sentences = 2
             if severity >= 4:
@@ -211,6 +213,11 @@ class ConversationHeuristics:
             max_sentences=max_sentences,
             matched_rules=tuple(matched_rules),
         )
+
+    @staticmethod
+    def _count_questions(text: str) -> int:
+        """Cuenta signos de interrogación de cierre para detectar múltiples preguntas."""
+        return text.count("?")
 
     @staticmethod
     def _has_open_question(user_input: str) -> bool:
@@ -251,5 +258,5 @@ class ConversationHeuristics:
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized
 
-    def _clamp(self, value: int) -> int:
-        return max(self.MIN_SEVERITY, min(self.MAX_SEVERITY, int(value)))
+    def _clamp(self, value) -> float:
+        return max(float(self.MIN_SEVERITY), min(float(self.MAX_SEVERITY), float(value)))
