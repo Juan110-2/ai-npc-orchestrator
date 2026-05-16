@@ -19,7 +19,7 @@ class ConversationMessageResponse(BaseModel):
     session_id: UUID
     role: str
     content: str
-    severity: int
+    severity: float
     risk_flags: List[str]
     ai_provider: Optional[str]
     tokens_used: Optional[int]

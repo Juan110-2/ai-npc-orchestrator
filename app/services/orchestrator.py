@@ -98,7 +98,7 @@ con una respuesta breve y natural.
                 lines.append("Indicadores presentes: " + ", ".join(map(str, risk_flags)) + ".")
             else:
                 lines.append(f"Indicadores presentes: {risk_flags}")
-        lines.append(f"Nivel de severidad emocional actual: {current_severity} de 5.")
+        lines.append(f"Nivel de severidad emocional actual: {round(current_severity)} de 5.")
 
         # REFUERZO IDENTIDAD: ultima linea con el nombre para que el modelo lo
         # tenga "fresco" justo antes de generar.
@@ -127,26 +127,11 @@ con una respuesta breve y natural.
         session_id: Optional[UUID] = None,
     ) -> AIResponse:
         """
-        Genera la respuesta del paciente simulado.
-        
-        CAMBIO CLAVE: Si current_severity == 0, SIEMPRE genera una despedida
-        contextual en lugar de seguir conversando.
+        Genera la respuesta normal del paciente simulado.
+        El cierre gradual y la despedida final son manejados por el endpoint
+        mediante respond_closing_phase y contextual_closing_response.
         """
-        
-        # ========================================================================
-        # NUEVO: DETECCION AUTOMATICA DE CIERRE POR SEVERIDAD 0
-        # ========================================================================
-        if current_severity == 0:
-            return ConversationOrchestrator.contextual_closing_response(
-                profile=profile,
-                scenario=scenario,
-                current_severity=current_severity,
-                closing_kind="success",
-                conversation_history=conversation_history,
-                db=db,
-                session_id=session_id,
-            )
-        
+
         # ========================================================================
         # FALLBACKS DETERMINISTICOS (crisis, boundary, defensive)
         # ========================================================================
@@ -167,29 +152,26 @@ con una respuesta breve y natural.
         # ========================================================================
         # MODULACION POR SEVERIDAD (mejorada)
         # ========================================================================
-        if current_severity >= 4:
+        sev = round(current_severity)   # redondear para comparaciones lógicas
+        if sev >= 4:
             severity_block = (
                 "Tu malestar es intenso. Te cuesta organizar lo que sientes "
                 "y hablas desde la carga emocional inmediata."
             )
-        elif current_severity == 3:
+        elif sev == 3:
             severity_block = (
                 "Sigues sintiendote mal, pero empiezas a reflexionar un poco mas. "
                 "Hay ambivalencia: una parte quiere hablar y otra se siente cansada."
             )
-        elif current_severity in (1, 2):
+        elif sev in (1, 2):
             severity_block = (
                 "Te sientes algo mas tranquilo y abierto a hablar. Puedes "
                 "profundizar un poco mas, conectar ideas y expresar cierto alivio."
             )
         else:
-            # NOTA: Este bloque ya NO se usa porque current_severity == 0 se
-            # maneja arriba con despedida automática. Lo dejo por seguridad.
             severity_block = (
-                "INSTRUCCION CRITICA: Tu malestar bajo a 0. La conversacion cumplió "
-                "su objetivo. Tu UNICA tarea es DESPEDIRTE AHORA. Agradece brevemente "
-                "por la ayuda, expresa alivio y di adios. Maximo 2 frases. "
-                "NO introduzcas nuevos problemas. NO sigas conversando. CIERRA."
+                "Tu malestar ha bajado considerablemente. Respondas con calma "
+                "y apertura; la conversación te está ayudando."
             )
 
         # ========================================================================
@@ -287,27 +269,26 @@ del caso.
         
         Retorna: (system_prompt, severity_block)
         """
-        if current_severity >= 4:
+        sev = round(current_severity)
+        if sev >= 4:
             severity_block = (
                 "Tu malestar es intenso. Te cuesta organizar lo que sientes y "
                 "hablas desde la carga emocional inmediata."
             )
-        elif current_severity == 3:
+        elif sev == 3:
             severity_block = (
                 "Sigues sintiendote mal, pero empiezas a reflexionar un poco mas. "
                 "Hay ambivalencia."
             )
-        elif current_severity in (1, 2):
+        elif sev in (1, 2):
             severity_block = (
                 "Te sientes algo mas tranquilo y abierto a hablar. Puedes "
                 "profundizar un poco mas y expresar cierto alivio."
             )
         else:
-            # Severidad 0: instrucción de cierre determinista
             severity_block = (
-                "INSTRUCCION CRITICA: Tu malestar bajo a 0. La conversacion te ayudo. "
-                "Tu UNICA tarea es DESPEDIRTE AHORA. Agradece brevemente, expresa alivio "
-                "y di adios. Maximo 2 frases. NO introduzcas problemas nuevos. CIERRA."
+                "Tu malestar ha bajado considerablemente. Respondes con calma "
+                "y apertura; la conversación te está ayudando."
             )
 
         heuristic_block = (
@@ -350,6 +331,122 @@ persona del caso.
         if response_mode == "defensive" and current_severity >= 4:
             return "Eso me lastima y me pone a la defensiva. Si me hablas asi, siento que todo empeora."
         return None
+
+    @staticmethod
+    def build_closing_phase_prompt(
+        profile,
+        scenario,
+        current_severity: int,
+        closing_kind: str,
+        turns_left: int,
+    ) -> str:
+        """
+        Construye el system prompt para los turnos intermedios de la fase de cierre
+        (antes de la despedida final). No hace llamada a la IA; solo devuelve el prompt.
+
+        turns_left: 3 = primer turno de cierre, 2 = segundo turno (el último antes
+                        de la despedida definitiva).
+        """
+        traits = profile.traits if isinstance(profile.traits, dict) else {}
+        name = (traits.get("identity_name") or profile.name or "").strip()
+
+        if closing_kind == "success":
+            if turns_left >= 3:
+                guidance = (
+                    "Empiezas a sentirte bastante mejor, aunque todavía algo sensible. "
+                    "Responde con naturalidad a lo que te dicen. Puedes expresar levemente "
+                    "que la conversación te está ayudando, sin entrar en un cierre todavía. "
+                    "Máximo 2 frases."
+                )
+            else:
+                guidance = (
+                    "Te sientes mucho mejor. La conversación ha sido útil. "
+                    "Responde brevemente a cualquier pregunta y empieza a cerrar: "
+                    "agradece el apoyo, expresa alivio. Prepara la despedida sin decirla aún. "
+                    "Máximo 2 frases."
+                )
+        else:  # crisis / inappropriate
+            if turns_left >= 3:
+                guidance = (
+                    "Tu malestar está al límite. Respondes pero estás muy agotado/a y cerrado/a. "
+                    "Frases muy cortas, monosilábicas si hace falta. "
+                    "Empiezas a desconectarte de la conversación. Máximo 2 frases breves."
+                )
+            else:
+                guidance = (
+                    "Ya no puedes más. Una sola frase, muy breve, expresando que necesitas irte. "
+                    "Estás a punto de cortar la conversación."
+                )
+
+        return (
+            ConversationOrchestrator._STABLE_PROMPT_HEADER
+            + "\n\n[CONTEXTO DEL PERSONAJE]\n"
+            + ConversationOrchestrator._format_profile_context(profile, scenario, current_severity)
+            + "\n\n[FASE DE CIERRE GRADUAL]\n"
+            + guidance
+            + "\n\nResponde en primera persona como "
+            + (name or "este personaje")
+            + ". Sin listas, sin etiquetas, en español natural."
+        )
+
+    @staticmethod
+    def respond_closing_phase(
+        profile,
+        scenario,
+        current_severity: int,
+        user_input: str,
+        conversation_history: list | None = None,
+        closing_kind: str = "success",
+        turns_left: int = 3,
+        *,
+        db=None,
+        session_id=None,
+    ) -> "AIResponse":
+        """
+        Genera la respuesta del NPC durante la fase de cierre gradual.
+        Usa build_closing_phase_prompt para construir el prompt y luego llama a la IA.
+        Si el LLM falla, hace fallback a un texto determinístico breve.
+        """
+        from app.services.ai.base import AIResponse
+
+        system_prompt = ConversationOrchestrator.build_closing_phase_prompt(
+            profile=profile,
+            scenario=scenario,
+            current_severity=current_severity,
+            closing_kind=closing_kind,
+            turns_left=turns_left,
+        )
+        context_messages = ConversationOrchestrator._build_context_messages(conversation_history)
+
+        try:
+            if db is not None:
+                with log_ai_call(
+                    db, purpose="orchestrator", session_id=session_id, call_mode="sync"
+                ) as ctx:
+                    ctx.record_prompt_chars(len(system_prompt) + len(user_input))
+                    ai_response = ctx.client.generate_response(
+                        system_prompt, user_input, context_messages=context_messages
+                    )
+                    ctx.record_response(ai_response, json_valid=None)
+                    return ai_response
+            else:
+                ai = get_ai_client()
+                return ai.generate_response(
+                    system_prompt, user_input, context_messages=context_messages
+                )
+        except Exception:
+            fallback = (
+                "Me empiezo a sentir algo mejor..." if closing_kind == "success"
+                else "Ya no puedo más con esto ahora mismo..."
+            )
+            return AIResponse(
+                content=fallback,
+                provider="deterministic",
+                model="closing-phase-fallback",
+                tokens_input=0,
+                tokens_output=0,
+                latency_ms=0.0,
+            )
 
     @staticmethod
     def contextual_closing_response(
@@ -464,9 +561,18 @@ persona del caso.
             )
         return "Voy a tener que irme ahora. Gracias por el tiempo."
 
+    # Número de mensajes recientes que se envían completos. Los anteriores se
+    # compactan en un resumen para reducir tokens en sesiones largas.
+    _CONTEXT_WINDOW = 12
+
     @staticmethod
     def _build_context_messages(conversation_history: list | None) -> list[dict[str, str]]:
-        """Mapea historial de BD a roles de chat manteniendo el contexto completo."""
+        """Mapea historial de BD a roles de chat con ventana deslizante.
+
+        Los últimos _CONTEXT_WINDOW mensajes se envían verbatim. Los anteriores
+        se compactan en un par user/assistant que resume la conversación previa,
+        recortando cada turno a 150 caracteres para ahorrar tokens.
+        """
         if not conversation_history:
             return []
 
@@ -477,12 +583,34 @@ persona del caso.
             "assistant": "assistant",
         }
 
-        mapped_messages: list[dict[str, str]] = []
+        all_messages: list[dict[str, str]] = []
         for message in conversation_history:
             role = role_map.get(getattr(message, "role", None), "user")
             content = (getattr(message, "content", "") or "").strip()
-            if not content:
-                continue
-            mapped_messages.append({"role": role, "content": content})
+            if content:
+                all_messages.append({"role": role, "content": content})
 
-        return mapped_messages
+        window = ConversationOrchestrator._CONTEXT_WINDOW
+        if len(all_messages) <= window:
+            return all_messages
+
+        older = all_messages[:-window]
+        recent = all_messages[-window:]
+
+        lines = []
+        for msg in older:
+            label = "Estudiante" if msg["role"] == "user" else "Paciente"
+            text = msg["content"]
+            if len(text) > 150:
+                text = text[:147] + "…"
+            lines.append(f"  {label}: {text}")
+
+        summary_block = (
+            "[Resumen de la conversación anterior — mensajes más recientes siguen a continuación]\n"
+            + "\n".join(lines)
+        )
+        return [
+            {"role": "user", "content": summary_block},
+            {"role": "assistant", "content": "[Ok, recuerdo esa conversación.]"},
+            *recent,
+        ]

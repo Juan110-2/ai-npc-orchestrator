@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, DateTime, Integer, ForeignKey
+from sqlalchemy import Column, DateTime, Float, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -22,6 +22,6 @@ class Session(Base):
         nullable=True,
     )
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
-    current_severity = Column(Integer, nullable=False)
+    current_severity = Column(Float, nullable=False)
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     ended_at = Column(DateTime(timezone=True))
