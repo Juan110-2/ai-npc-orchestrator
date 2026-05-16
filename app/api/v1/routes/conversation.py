@@ -85,23 +85,74 @@ def _apply_heuristics_and_evaluator(db: Session, session, user_input: str):
 
     session.current_severity = decision.next_severity
 
-    # Aplicar el impact del evaluator solo cuando la categoria es ambigua
+    # Aplicar el impacto del evaluador:
+    # - SUPPORTIVE: el evaluador es la única fuente de reducción de severidad
+    # - NEUTRAL / CONFUSING / INDIFFERENT: el evaluador ajusta según calidad
+    # - Categorías de escalada (INVALIDATING, INAPPROPRIATE, RISK): ya subieron
+    #   via heurística; no aplicar evaluador para evitar doble penalización.
     if decision.category in (
+        MessageCategory.SUPPORTIVE,
         MessageCategory.NEUTRAL,
         MessageCategory.CONFUSING,
         MessageCategory.INDIFFERENT,
     ) and impact != 0:
-        safe_impact = impact
-        if decision.category == MessageCategory.INDIFFERENT and impact < 0:
-            safe_impact = 0
-        session.current_severity = max(0, min(5, session.current_severity + safe_impact))
-
-    if decision.should_close or session.current_severity <= 0:
-        session.current_severity = max(0, session.current_severity)
-        session.ended_at = datetime.now(timezone.utc)
+        # Escalar el impacto del evaluador para producir cambios graduales.
+        # Un turno excelente (evaluador -1) baja 0.3 en vez de 1.0 entero.
+        # La deterioración heurística (INVALIDATING, RISK, etc.) sigue siendo entera.
+        safe_impact = impact * _EVALUATOR_SCALE
+        # La indiferencia no debe "premiarse": ignorar impactos negativos.
+        if decision.category == MessageCategory.INDIFFERENT and safe_impact < 0:
+            safe_impact = 0.0
+        session.current_severity = max(0.0, min(5.0, session.current_severity + safe_impact))
 
     db.commit()
     return decision
+
+
+_MAX_CLOSING_TURNS = 3
+
+# Fracción del impacto del evaluador que se aplica a la severidad.
+# El evaluador devuelve -1 / 0 / +1; con esta escala un turno excelente
+# baja ~0.3 puntos en lugar de 1.0 entero, haciendo la mejora gradual.
+# La deterioración sigue siendo de pasos enteros (heurística no escala).
+_EVALUATOR_SCALE = 0.5
+
+
+def _compute_closing_state(current_severity: int, context_history: list, decision=None) -> dict | None:
+    """
+    Determina si la sesión está en fase de cierre gradual basándose en la
+    severidad actual y el historial de mensajes.
+
+    Retorna None si la conversación es normal, o un dict con:
+      - kind: "success" | "crisis" | "inappropriate"
+      - patient_turns: cuántos mensajes del paciente ya existen en este límite
+    """
+    at_bottom = current_severity <= 0.5
+    at_top = current_severity >= 5.0
+    if not at_bottom and not at_top:
+        return None
+
+    if at_bottom:
+        kind = "success"
+    else:
+        if decision and decision.category == MessageCategory.INAPPROPRIATE:
+            kind = "inappropriate"
+        else:
+            kind = "crisis"
+
+    # Contar mensajes consecutivos del paciente en el límite actual (0 o 5).
+    # Usamos comparación de rango en lugar de igualdad exacta por el float.
+    boundary_check = (lambda s: s <= 0.5) if at_bottom else (lambda s: s >= 5.0)
+    patient_turns = 0
+    for msg in reversed(context_history):
+        if msg.role != "patient":
+            continue
+        if boundary_check(msg.severity):
+            patient_turns += 1
+        else:
+            break
+
+    return {"kind": kind, "patient_turns": patient_turns}
 
 
 def _infer_closing_kind(decision, final_severity: int) -> str:
@@ -141,19 +192,38 @@ def converse(
     decision = _apply_heuristics_and_evaluator(db, session, user_input)
     context_history = ConversationRepository.list_by_session(db=db, session_id=session.id)
 
-    # Si la sesion va a cerrar, el NPC se despide CONTEXTUALMENTE (LLM + caso)
-    should_close = session.ended_at is not None
-    if should_close:
-        closing_kind = _infer_closing_kind(decision, session.current_severity)
-        ai_response = ConversationOrchestrator.contextual_closing_response(
-            profile=profile,
-            scenario=scenario,
-            current_severity=session.current_severity,
-            closing_kind=closing_kind,
-            conversation_history=context_history,
-            db=db,
-            session_id=session.id,
-        )
+    # ── Fase de cierre gradual (3 turnos antes de cerrar definitivamente) ──
+    closing = _compute_closing_state(session.current_severity, context_history, decision)
+    should_close = False
+
+    if closing is not None:
+        patient_turns = closing["patient_turns"]
+        if patient_turns >= _MAX_CLOSING_TURNS - 1:
+            # Turno final → despedida contextual + cerrar sesión después
+            should_close = True
+            ai_response = ConversationOrchestrator.contextual_closing_response(
+                profile=profile,
+                scenario=scenario,
+                current_severity=session.current_severity,
+                closing_kind=closing["kind"],
+                conversation_history=context_history,
+                db=db,
+                session_id=session.id,
+            )
+        else:
+            # Turno intermedio → respuesta de cierre gradual (sin cerrar aún)
+            turns_left = _MAX_CLOSING_TURNS - patient_turns
+            ai_response = ConversationOrchestrator.respond_closing_phase(
+                profile=profile,
+                scenario=scenario,
+                current_severity=session.current_severity,
+                user_input=user_input,
+                conversation_history=context_history,
+                closing_kind=closing["kind"],
+                turns_left=turns_left,
+                db=db,
+                session_id=session.id,
+            )
     else:
         ai_response = ConversationOrchestrator.respond(
             profile=profile,
@@ -178,13 +248,20 @@ def converse(
         tokens_used=ai_response.tokens_total, latency_ms=ai_response.latency_ms,
     )
 
-    # Si cerro la sesion, disparar evaluacion automatica (best-effort)
     if should_close:
+        # Normalizar la severidad final al límite exacto para que los registros
+        # sean coherentes: éxito → 0.0, crisis/inapropiado → 5.0.
+        if closing and closing["kind"] == "success":
+            session.current_severity = 0.0
+        elif closing and closing["kind"] in ("crisis", "inappropriate"):
+            session.current_severity = 5.0
+        session.ended_at = datetime.now(timezone.utc)
+        db.commit()
         try:
             from app.services.evaluation_service import run_auto_evaluation
             run_auto_evaluation(db, session.id)
         except Exception as e:
-            print(f"[converse] run_auto_evaluation fallo: {type(e).__name__}: {e}")
+            print(f"[converse] run_auto_evaluation falló: {type(e).__name__}: {e}")
 
     return patient_msg
 
@@ -212,67 +289,73 @@ def converse_stream(
     context_history = ConversationRepository.list_by_session(db=db, session_id=session.id)
 
     final_severity = session.current_severity
-    should_close = session.ended_at is not None
-    closing_kind = _infer_closing_kind(decision, final_severity) if should_close else None
 
-    # Si NO va a cerrar y hay fallback reactivo, usamos texto deterministico.
-    # Si va a cerrar, generamos despedida contextual con LLM (no deterministico).
+    # ── Fase de cierre gradual ──────────────────────────────────────────────
+    closing = _compute_closing_state(final_severity, context_history, decision)
+    should_close = False
+    closing_kind = None
+
     forced_text = None
-    use_closing_prompt = False
-    if should_close:
-        use_closing_prompt = True  # generaremos con LLM usando un system prompt de despedida
+    system_prompt = None
+
+    if closing is not None:
+        patient_turns = closing["patient_turns"]
+        closing_kind = closing["kind"]
+        if patient_turns >= _MAX_CLOSING_TURNS - 1:
+            # Turno final → despedida + cerrar sesión tras guardar el mensaje
+            should_close = True
+            closing_instr_map = {
+                "success": (
+                    "La conversación ha logrado calmarte. Despídete agradeciendo de manera "
+                    "concreta por la ayuda recibida sobre tu situación específica "
+                    "(menciónala brevemente). Expresa alivio real y un cierre amable. "
+                    "No introduzcas problemas nuevos."
+                ),
+                "crisis": (
+                    "Estás en crisis emocional intensa (severidad 5). No puedes sostener "
+                    "más la conversación. Despídete brevemente mencionando que tu situación "
+                    "concreta te tiene desbordado y que necesitas parar ahora. "
+                    "Tono breve, emocional, sin agresividad."
+                ),
+                "inappropriate": (
+                    "El usuario te trató de manera inadecuada y vas a cerrar la conversación "
+                    "con dignidad. Despídete brevemente marcando un límite claro y firme. "
+                    "Sin agresividad, pero con firmeza. Una o dos frases máximo."
+                ),
+            }
+            closing_instr = closing_instr_map.get(closing_kind, "Despídete brevemente.")
+            system_prompt = (
+                ConversationOrchestrator._STABLE_PROMPT_HEADER
+                + "\n\n[CONTEXTO DEL PERSONAJE]\n"
+                + ConversationOrchestrator._format_profile_context(profile, scenario, final_severity)
+                + "\n\n[INSTRUCCIÓN DE CIERRE]\n"
+                + closing_instr
+                + "\n\nMáximo 3 frases. En primera persona. Sin listas, sin etiquetas, en español natural."
+            )
+            user_input = "Despídete ahora cumpliendo todas las reglas anteriores."
+        else:
+            # Turno intermedio → prompt de cierre gradual, sin cerrar aún
+            turns_left = _MAX_CLOSING_TURNS - patient_turns
+            system_prompt = ConversationOrchestrator.build_closing_phase_prompt(
+                profile=profile, scenario=scenario,
+                current_severity=final_severity,
+                closing_kind=closing_kind,
+                turns_left=turns_left,
+            )
     else:
         forced_text = ConversationOrchestrator._fallback_reactive_response(
             response_mode=decision.response_mode.value,
             current_severity=final_severity,
         )
-
-    system_prompt = None
-    if use_closing_prompt:
-        # Construir un system prompt especifico de despedida que use el contexto
-        # del paciente. Si el LLM falla, el catch caera al closing_message
-        # deterministico.
-        from app.services.ai.factory import get_ai_client as _gac
-        closing_instr_map = {
-            "success": (
-                "La conversacion ha logrado calmarte. Tu severidad esta en 0 o 1. "
-                "Despidete agradeciendo de manera CONCRETA por la ayuda recibida sobre "
-                "tu situacion especifica (mencionala brevemente). Expresa alivio real "
-                "y un cierre amable. NO introduzcas problemas nuevos."
-            ),
-            "crisis": (
-                "Estas en crisis emocional intensa (severidad 5). NO puedes sostener "
-                "mas la conversacion. Despidete brevemente mencionando que TU situacion "
-                "concreta te tiene desbordado y que necesitas parar AHORA. Tono breve, "
-                "emocional, sin agresividad."
-            ),
-            "inappropriate": (
-                "El usuario te trato de manera inadecuada y vas a cerrar la conversacion "
-                "con dignidad. Despidete brevemente marcando un limite claro y firme. "
-                "Sin agresividad, pero con firmeza. Una o dos frases maximo."
-            ),
-        }
-        closing_instr = closing_instr_map.get(closing_kind, "Despidete brevemente.")
-        system_prompt = (
-            ConversationOrchestrator._STABLE_PROMPT_HEADER
-            + "\n\n[CONTEXTO DEL PERSONAJE]\n"
-            + ConversationOrchestrator._format_profile_context(profile, scenario, final_severity)
-            + "\n\n[INSTRUCCION DE CIERRE]\n"
-            + closing_instr
-            + "\n\nMaximo 3 frases. En primera persona. Sin listas, sin etiquetas, en espanol natural."
-        )
-        # Para la despedida usamos un user_prompt de "despidete" en lugar del input
-        # del usuario, porque el user_input puede ser el detonante del cierre (ej. insulto).
-        user_input = "Despidete ahora cumpliendo todas las reglas anteriores."
-    elif not forced_text:
-        system_prompt, _ = ConversationOrchestrator.build_prompt(
-            profile=profile, scenario=scenario,
-            current_severity=final_severity,
-            response_mode=decision.response_mode.value,
-            max_sentences=decision.max_sentences,
-            should_rotate_focus=decision.should_rotate_focus,
-            category=decision.category.value,
-        )
+        if not forced_text:
+            system_prompt, _ = ConversationOrchestrator.build_prompt(
+                profile=profile, scenario=scenario,
+                current_severity=final_severity,
+                response_mode=decision.response_mode.value,
+                max_sentences=decision.max_sentences,
+                should_rotate_focus=decision.should_rotate_focus,
+                category=decision.category.value,
+            )
 
     from app.services.ai.factory import get_ai_client
     from app.services.ai.base import StreamResult
@@ -330,13 +413,19 @@ def converse_stream(
             tokens_used=tokens_input + tokens_output, latency_ms=latency_ms,
         )
 
-        # Si cerro la sesion, disparar evaluacion automatica
+        # Cerrar la sesión y disparar evaluación automática si corresponde
         if should_close:
+            if closing_kind == "success":
+                session.current_severity = 0.0
+            elif closing_kind in ("crisis", "inappropriate"):
+                session.current_severity = 5.0
+            session.ended_at = datetime.now(timezone.utc)
+            db.commit()
             try:
                 from app.services.evaluation_service import run_auto_evaluation
                 run_auto_evaluation(db, session.id)
             except Exception as e:
-                print(f"[converse_stream] run_auto_evaluation fallo: {type(e).__name__}: {e}")
+                print(f"[converse_stream] run_auto_evaluation falló: {type(e).__name__}: {e}")
 
         yield (
             "data: "

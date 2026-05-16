@@ -16,8 +16,8 @@ class ConversationMessage(Base):
     role = Column(Text, nullable=False)
     content = Column(Text, nullable=False)
 
-    # Estado emocional en el momento del turno (rango 0-5)
-    severity = Column(Integer, nullable=False)
+    # Estado emocional en el momento del turno (rango 0.0–5.0, float para progreso gradual)
+    severity = Column(Float, nullable=False)
     risk_flags = Column(JSONB, nullable=False, default=list)
 
     # Metricas de IA - solo se populan en mensajes del paciente (role="patient")
