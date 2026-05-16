@@ -18,7 +18,7 @@ class SessionResponse(BaseModel):
     user_id: Optional[UUID] = None
     assigned_by: Optional[UUID] = None
     assigned_at: Optional[datetime] = None
-    current_severity: int
+    current_severity: float
     started_at: datetime
     ended_at: Optional[datetime] = None
 
