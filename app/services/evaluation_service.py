@@ -33,6 +33,8 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
         select
             s.started_at,
             s.ended_at,
+            s.accumulated_seconds,
+            s.time_source,
             s.current_severity as severity_final,
             count(cm.id) filter (where cm.role = 'trainee')   as turns_trainee,
             count(cm.id) filter (where cm.role = 'patient')   as turns_patient,
@@ -41,14 +43,22 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
         from public.sessions s
         left join public.conversation_messages cm on cm.session_id = s.id
         where s.id = :sid
-        group by s.id, s.started_at, s.ended_at, s.current_severity
+        group by s.id, s.started_at, s.ended_at, s.accumulated_seconds,
+                 s.time_source, s.current_severity
     """), {"sid": str(session_id)}).mappings().first()
 
     if not base:
         return {}
 
+    accumulated_seconds = int(base["accumulated_seconds"] or 0)
+    time_source = base["time_source"] or "none"
+
     duration_minutes: Optional[float] = None
-    if base["started_at"] and base["ended_at"]:
+    if time_source in ("explicit", "estimated") and accumulated_seconds > 0:
+        # Tiempo de práctica efectiva reportado por el frontend o estimado por gaps
+        duration_minutes = accumulated_seconds / 60.0
+    elif base["started_at"] and base["ended_at"]:
+        # Fallback para sesiones sin datos de tiempo (legacy / clientes sin timer)
         duration_minutes = (
             (base["ended_at"] - base["started_at"]).total_seconds() / 60.0
         )
@@ -88,6 +98,16 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
           and severity >= 4
     """), {"sid": str(session_id)}).mappings().one()["n"]
 
+    last_model_row = db.execute(text("""
+        select ai_model
+        from public.conversation_messages
+        where session_id = :sid
+          and role = 'patient'
+          and ai_model is not null
+        order by created_at desc
+        limit 1
+    """), {"sid": str(session_id)}).mappings().first()
+
     return {
         "turns_total": int(base["turns_total"] or 0),
         "turns_trainee": int(base["turns_trainee"] or 0),
@@ -95,9 +115,11 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
         "duration_minutes": (
             round(duration_minutes, 2) if duration_minutes is not None else None
         ),
+        "duration_source": time_source,
         "severity_peak": int(base["severity_peak"]) if base["severity_peak"] is not None else None,
         "severity_final": int(base["severity_final"]) if base["severity_final"] is not None else None,
         "risk_alerts_detected": int(risk_alerts or 0),
+        "last_ai_model": last_model_row["ai_model"] if last_model_row else None,
         "classifier_calls_by_status": classifier_calls_by_status,
         "classifier_calls_by_category": classifier_calls_by_category,
     }

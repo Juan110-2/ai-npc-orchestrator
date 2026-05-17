@@ -16,7 +16,7 @@ Endpoints:
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -225,6 +225,7 @@ def submit_teacher_evaluation(
 
 @router.get("/")
 def list_evaluations(
+    session_ids: list[UUID] = Query(default=[]),
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ):
@@ -233,6 +234,7 @@ def list_evaluations(
       - student: solo las suyas (filtradas por student_id == user.id).
       - teacher/admin: todas.
       - sin auth (dev): todas.
+    Filtro opcional: session_ids (lista de UUIDs) — devuelve solo las de esas sesiones.
     """
     from app.models.session_evaluation import SessionEvaluation
     from app.models.profile import Profile
@@ -254,6 +256,9 @@ def list_evaluations(
 
     if SUPABASE_JWT_SECRET and user is not None and user.role == "student":
         q = q.filter(SessionEvaluation.student_id == user.id)
+
+    if session_ids:
+        q = q.filter(SessionEvaluation.session_id.in_(session_ids))
 
     rows = q.limit(200).all()
     out = []
