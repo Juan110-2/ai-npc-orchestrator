@@ -11,13 +11,24 @@ class SessionRepository:
         db: Session,
         profile_id,
         scenario,
+        profile=None,
         user_id: UUID | None = None,
         assigned_by: UUID | None = None,
     ) -> SessionModel:
+        b = (profile.behavior or {}) if profile and hasattr(profile, 'behavior') else {}
+        b_min = float(b.get('behavior_min', 0.0))
+        b_max = float(b.get('behavior_max', 5.0))
+        if b_min >= b_max:
+            b_min, b_max = 0.0, 5.0
+        # base_severity: severidad inicial real, ya acotada al rango del perfil.
+        # current_severity arranca igual; base_severity nunca cambia durante la sesión.
+        initial_sev = max(b_min, min(b_max, float(scenario.severity)))
+
         session = SessionModel(
             profile_id=profile_id,
             scenario_id=scenario.id,
-            current_severity=scenario.severity,
+            current_severity=initial_sev,
+            base_severity=initial_sev,
             user_id=user_id,
             assigned_by=assigned_by,
         )

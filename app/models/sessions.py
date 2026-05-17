@@ -23,5 +23,8 @@ class Session(Base):
     )
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
     current_severity = Column(Float, nullable=False)
+    # Severidad real al inicio de la sesión (después de aplicar el límite del perfil).
+    # Permite distinguir si la sesión arrancó en el límite máximo/mínimo.
+    base_severity = Column(Float, nullable=True)
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     ended_at = Column(DateTime(timezone=True))

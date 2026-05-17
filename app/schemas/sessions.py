@@ -19,6 +19,7 @@ class SessionResponse(BaseModel):
     assigned_by: Optional[UUID] = None
     assigned_at: Optional[datetime] = None
     current_severity: float
+    base_severity: Optional[float] = None
     started_at: datetime
     ended_at: Optional[datetime] = None
 
