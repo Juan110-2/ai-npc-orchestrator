@@ -74,6 +74,7 @@ def start_session(
 
     return SessionRepository.start(
         db, profile.id, scenario,
+        profile=profile,
         user_id=user_id,
         assigned_by=assigned_by,
     )
