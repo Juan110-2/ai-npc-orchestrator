@@ -355,11 +355,13 @@ def _compute_closing_state(
 
 def _finalize_session(session, ctx: TurnContext, db: Session) -> None:
     """Pina severidad final y marca sesión cerrada usando la sesión BD del request."""
+    from app.services.session_time_service import finalize_session_time
     if ctx.closing_kind == "success":
         session.current_severity = ctx.b_min
     elif ctx.closing_kind == "crisis":
         session.current_severity = ctx.b_max
     # "inappropriate" o None: severidad queda en el valor real del momento del cierre.
+    session.status = "terminated" if ctx.closing_kind in ("crisis", "inappropriate") else "completed"
     session.ended_at = datetime.now(timezone.utc)
     # FIX F: rollback explícito si el commit falla.
     try:
@@ -368,6 +370,11 @@ def _finalize_session(session, ctx: TurnContext, db: Session) -> None:
         db.rollback()
         logger.error("[_finalize_session] Falló commit al cerrar sesión", exc_info=True)
         raise
+    try:
+        finalize_session_time(db, session)
+        db.commit()
+    except Exception:
+        logger.error("[_finalize_session] Error finalizando tiempo", exc_info=True)
 
 
 def _finalize_session_in_generator(
@@ -377,6 +384,7 @@ def _finalize_session_in_generator(
     Versión del cierre para el generador SSE, que usa su propia sesión BD.
     Re-fetch necesario porque gen_db no comparte estado con la sesión del request.
     """
+    from app.services.session_time_service import finalize_session_time
     sess_obj = SessionRepository.get_by_id(gen_db, session_id)
     if not sess_obj:
         logger.error("No se encontró la sesión %s al finalizar desde el generador", session_id)
@@ -386,6 +394,7 @@ def _finalize_session_in_generator(
     elif ctx.closing_kind == "crisis":
         sess_obj.current_severity = ctx.b_max
     # "inappropriate" o None: severidad queda en el valor real del momento del cierre.
+    sess_obj.status = "terminated" if ctx.closing_kind in ("crisis", "inappropriate") else "completed"
     sess_obj.ended_at = datetime.now(timezone.utc)
     # FIX F: rollback explícito si el commit falla.
     try:
@@ -395,6 +404,12 @@ def _finalize_session_in_generator(
         logger.error(
             "[_finalize_session_in_generator] Falló commit al cerrar sesión", exc_info=True
         )
+        return
+    try:
+        finalize_session_time(gen_db, sess_obj)
+        gen_db.commit()
+    except Exception:
+        logger.error("[_finalize_session_in_generator] Error finalizando tiempo", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +484,8 @@ def _process_turn(
         behavioral_flags.append("abuse")
         if "recurrence:repeat_abuse" in decision.matched_rules:
             behavioral_flags.append("repeat_abuse")
+    elif decision.category == MessageCategory.RISK:
+        behavioral_flags.append("risk")
 
     return TurnContext(
         decision=decision,
@@ -547,7 +564,6 @@ def _build_stream_inputs(
         response_mode=ctx.decision.response_mode.value,
         max_sentences=ctx.decision.max_sentences,
         should_rotate_focus=ctx.decision.should_rotate_focus,
-        category=ctx.decision.category.value,
     )
     return StreamInputs(
         system_prompt=system_prompt,
@@ -607,7 +623,6 @@ def converse(
             response_mode=ctx.decision.response_mode.value,
             max_sentences=ctx.decision.max_sentences,
             should_rotate_focus=ctx.decision.should_rotate_focus,
-            category=ctx.decision.category.value,
             db=db,
             session_id=session.id,
         )

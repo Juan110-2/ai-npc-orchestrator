@@ -111,7 +111,6 @@ class TestConversationHeuristics(unittest.TestCase):
             response_mode="boundary",
             max_sentences=2,
             should_rotate_focus=True,
-            category="inappropriate",
         )
 
         self.assertIn("respeto", text.lower())
