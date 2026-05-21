@@ -72,10 +72,36 @@ def _require_admin(
     return user
 
 
-@router.get("/providers")
+@router.get(
+    "/providers",
+    summary="Métricas por proveedor 🔒 admin",
+    description=(
+        "Devuelve métricas agregadas de rendimiento por proveedor de IA, modelo y propósito "
+        "(leídas desde la vista `v_provider_metrics` en PostgreSQL).\n\n"
+        "**Campos retornados por fila:**\n\n"
+        "| Campo | Descripción |\n"
+        "|---|---|\n"
+        "| `provider` / `model` / `purpose` | Identificadores |\n"
+        "| `n_calls`, `n_ok`, `n_errors` | Conteos |\n"
+        "| `success_rate_pct` | Tasa de éxito (%) |\n"
+        "| `p50_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `mean_latency_ms` | Latencia |\n"
+        "| `mean_ttft_ms`, `p95_ttft_ms` | Tiempo al primer token |\n"
+        "| `total_cost_usd`, `mean_cost_usd_per_call` | Costo |\n"
+        "| `json_valid_rate_pct` | Tasa de respuestas JSON válidas |\n\n"
+        "El parámetro opcional `purpose` filtra por propósito: `orchestrator`, `classifier`, `evaluator`."
+    ),
+    response_description="Lista de filas de métricas agrupadas por proveedor, modelo y propósito.",
+    responses={
+        401: {"description": "Token no enviado o inválido"},
+        403: {"description": "Se requiere rol `admin`"},
+    },
+)
 def get_provider_metrics(
     db: Session = Depends(get_db),
-    purpose: Optional[str] = Query(default=None),
+    purpose: Optional[str] = Query(
+        default=None,
+        description="Filtrar por propósito de llamada: `orchestrator`, `classifier`, `evaluator`.",
+    ),
     _: Optional[UserProfile] = Depends(_require_admin),
 ):
     where_clause = ""
@@ -103,11 +129,34 @@ def get_provider_metrics(
     return [dict(r) for r in rows]
 
 
-@router.get("/calls")
+@router.get(
+    "/calls",
+    summary="Últimas llamadas a IA 🔒 admin",
+    description=(
+        "Devuelve el log de las llamadas más recientes a los proveedores de IA, "
+        "con detalles de tokens, latencia, costo y estado.\n\n"
+        "Filtros disponibles:\n"
+        "- `limit`: número de registros a devolver (1–1000, default 100).\n"
+        "- `provider`: filtra por proveedor específico (p. ej. `openai`, `gemini`, `deepseek`)."
+    ),
+    response_description="Lista de registros de llamadas ordenados por fecha descendente.",
+    responses={
+        401: {"description": "Token no enviado o inválido"},
+        403: {"description": "Se requiere rol `admin`"},
+    },
+)
 def list_recent_calls(
     db: Session = Depends(get_db),
-    limit: int = Query(default=100, ge=1, le=1000),
-    provider: Optional[str] = Query(default=None),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Número de registros a devolver (1–1000).",
+    ),
+    provider: Optional[str] = Query(
+        default=None,
+        description="Filtrar por proveedor: `openai`, `gemini`, `deepseek`, etc.",
+    ),
     _: Optional[UserProfile] = Depends(_require_admin),
 ):
     rows = (
@@ -132,7 +181,25 @@ def list_recent_calls(
     ]
 
 
-@router.get("/summary")
+@router.get(
+    "/summary",
+    summary="Resumen global de métricas 🔒 admin",
+    description=(
+        "Devuelve un resumen consolidado de todas las llamadas a IA, estructurado en tres niveles:\n\n"
+        "- **`totals`**: totales globales (llamadas, tokens, errores, costo, proveedores únicos).\n"
+        "- **`by_provider`**: desglose por proveedor y modelo (llamadas, tasa de éxito, "
+        "latencia media, costo).\n"
+        "- **`by_purpose`**: desglose por propósito de llamada (`orchestrator`, `classifier`, "
+        "`evaluator`), con latencia media y tasa de JSON válido."
+    ),
+    response_description=(
+        "Objeto con `totals` (dict), `by_provider` (lista) y `by_purpose` (lista)."
+    ),
+    responses={
+        401: {"description": "Token no enviado o inválido"},
+        403: {"description": "Se requiere rol `admin`"},
+    },
+)
 def get_metrics_summary(
     db: Session = Depends(get_db),
     _: Optional[UserProfile] = Depends(_require_admin),

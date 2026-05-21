@@ -16,3 +16,4 @@ google-generativeai           # Google Gemini
 
 # Autenticación JWT (Supabase)
 python-jose[cryptography]
+httpx                         # Cliente HTTP para proxy de Supabase Auth

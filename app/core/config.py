@@ -28,6 +28,7 @@ DEEPSEEK_API_KEY: str | None = os.getenv("DEEPSEEK_API_KEY")
 # ----- Supabase Auth (opcional) ---------------------------------------------
 SUPABASE_JWT_SECRET: str | None = os.getenv("SUPABASE_JWT_SECRET")
 SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY: str | None = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_JWT_ISSUER: str | None = os.getenv("SUPABASE_JWT_ISSUER")
 if not SUPABASE_JWT_ISSUER and SUPABASE_URL:
     SUPABASE_JWT_ISSUER = f"{SUPABASE_URL.rstrip('/')}/auth/v1"

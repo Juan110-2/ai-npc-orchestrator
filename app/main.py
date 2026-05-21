@@ -3,10 +3,121 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.routes import (
-    profiles, conversation, scenarios, sessions, admin, metrics, evaluations,
+    profiles, conversation, scenarios, sessions, admin, metrics, evaluations, auth,
 )
 
-app = FastAPI(title="AI NPC Orchestrator", version="0.1.0")
+_DESCRIPTION = """
+API del orquestador de simulaciones con personajes NPC impulsados por IA.
+
+## Recursos principales
+
+| Recurso | Descripción |
+|---|---|
+| **Profiles** | Perfiles de personajes simulados (identidad, comportamiento, rango de severidad) |
+| **Scenarios** | Escenarios de simulación que contextualizan cada sesión (situación, severidad inicial, riesgos) |
+| **Sessions** | Sesiones: vinculan perfil + escenario, rastrean severidad y tiempo acumulado |
+| **Conversation** | Motor de conversación: turno síncrono o streaming SSE en tiempo real |
+| **Admin** | Gestión de usuarios y roles (`student` / `teacher` / `admin`) |
+| **Admin Metrics** | Métricas técnicas de proveedores de IA: latencia, tokens, costos (solo `admin`) |
+| **Evaluation** | Evaluación: métricas automáticas + rúbrica completada por el docente |
+
+## Autenticación
+
+Los endpoints protegidos requieren un JWT de Supabase en el header:
+
+```
+Authorization: Bearer <token>
+```
+
+En modo desarrollo (sin `SUPABASE_JWT_SECRET`), la autenticación se omite automáticamente.
+
+## Severidad emocional
+
+La severidad (`current_severity`) es un valor flotante entre `behavior_min` y `behavior_max`
+del perfil (por defecto `0.0–5.0`). Refleja el estado emocional del personaje simulado (NPC):
+
+- **0–1**: Calmado, receptivo
+- **2–3**: Moderadamente angustiado
+- **4**: Severamente angustiado
+- **5**: Muy alto — cierre automático de sesión
+"""
+
+app = FastAPI(
+    title="AI NPC Orchestrator",
+    version="0.1.0",
+    description=_DESCRIPTION,
+    # contact={
+    #     "name": "Trabajo de Grado — AI NPC Orchestrator",
+    #     "email": "juan.moreno.jaramillo@correounivalle.edu.co",
+    # },
+    openapi_tags=[
+        {
+            "name": "auth",
+            "description": (
+                "Autenticación de usuarios. "
+                "`POST /auth/login` permite obtener un JWT de Supabase con email y contraseña, "
+                "listo para usar en los endpoints protegidos directamente desde Swagger. "
+                "Otros métodos (Google OAuth, magic link) se inician desde el frontend."
+            ),
+        },
+        {
+            "name": "profiles",
+            "description": (
+                "Perfiles de personajes simulados (NPC). "
+                "Definen nombre, identidad (`traits`) y comportamiento conversacional (`behavior`), "
+                "incluido el rango de severidad emocional permitido."
+            ),
+        },
+        {
+            "name": "scenarios",
+            "description": (
+                "Escenarios de simulación que contextualizan cada sesión. "
+                "Incluyen la situación narrativa, severidad emocional inicial (1–5), "
+                "indicadores de riesgo y restricciones específicas."
+            ),
+        },
+        {
+            "name": "sessions",
+            "description": (
+                "Sesiones de práctica que vinculan un perfil con un escenario. "
+                "Rastrean severidad emocional en tiempo real, tiempo acumulado y estado "
+                "(`active` / `completed` / `terminated`)."
+            ),
+        },
+        {
+            "name": "conversation",
+            "description": (
+                "Motor de conversación con el NPC. Cada turno persiste mensajes, "
+                "recalcula severidad y detecta condiciones de cierre automático. "
+                "Soporta respuesta síncrona y streaming SSE (`text/event-stream`)."
+            ),
+        },
+        {
+            "name": "admin",
+            "description": (
+                "Gestión de usuarios y roles. "
+                "`GET /admin/me` requiere cualquier JWT válido; "
+                "el resto de operaciones exige rol `admin`."
+            ),
+        },
+        {
+            "name": "admin-metrics",
+            "description": (
+                "Métricas técnicas de los proveedores de IA utilizados en el orquestador "
+                "(latencia p50/p95/p99, TTFT, tokens, tasa de éxito, costo). "
+                "Acceso exclusivo para `admin`."
+            ),
+        },
+        {
+            "name": "evaluation",
+            "description": (
+                "Evaluación pedagógica de sesiones. "
+                "Incluye métricas automáticas (calculadas al cerrar la sesión) "
+                "y la rúbrica completada por el docente con puntuaciones y retroalimentación."
+            ),
+        },
+    ],
+)
 
 default_origins = ",".join(
     [
@@ -26,6 +137,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(profiles.router)
 app.include_router(conversation.router)
 app.include_router(scenarios.router)
@@ -35,6 +147,6 @@ app.include_router(metrics.router)
 app.include_router(evaluations.router)
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def read_root():
     return {"service": "ai-npc-orchestrator", "status": "ok"}

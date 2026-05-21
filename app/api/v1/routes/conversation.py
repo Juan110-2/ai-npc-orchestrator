@@ -576,7 +576,31 @@ def _build_stream_inputs(
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/{session_id}", response_model=ConversationMessageResponse)
+@router.post(
+    "/{session_id}",
+    response_model=ConversationMessageResponse,
+    summary="Enviar mensaje (síncrono)",
+    description=(
+        "Procesa un turno de conversación con el personaje simulado (NPC) y devuelve "
+        "la respuesta completa cuando está lista.\n\n"
+        "**Flujo interno por turno:**\n"
+        "1. Persiste el mensaje del usuario (`role=trainee`).\n"
+        "2. En paralelo: clasifica semánticamente el mensaje, evalúa la calidad de la "
+        "intervención y detecta reincidencia de abuso (si aplica).\n"
+        "3. Recalcula `current_severity` del NPC según la decisión heurística + impacto del evaluador.\n"
+        "4. Detecta condición de cierre automático (severidad en límite por N turnos consecutivos "
+        "o abuso reiterado).\n"
+        "5. Genera la respuesta del NPC via el proveedor de IA activo.\n"
+        "6. Persiste el mensaje del NPC (`role=patient`) con severidad, flags y métricas de IA.\n"
+        "7. Si la sesión debe cerrarse, la finaliza y dispara la evaluación automática.\n\n"
+        "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE)."
+    ),
+    response_description="Mensaje del personaje simulado (NPC) con severidad y métricas de IA.",
+    responses={
+        400: {"description": "Mensaje vacío o sesión ya cerrada"},
+        404: {"description": "Sesión, perfil o escenario no encontrado"},
+    },
+)
 def converse(
     session_id: UUID,
     payload: ConversationInput,
@@ -659,7 +683,28 @@ def converse(
     return patient_msg
 
 
-@router.post("/{session_id}/stream")
+@router.post(
+    "/{session_id}/stream",
+    summary="Enviar mensaje (streaming SSE)",
+    description=(
+        "Versión streaming de `POST /{session_id}`. "
+        "Devuelve la respuesta del personaje simulado en tiempo real mediante "
+        "**Server-Sent Events** (`text/event-stream`).\n\n"
+        "**Eventos SSE emitidos:**\n\n"
+        "| Evento | Payload | Descripción |\n"
+        "|---|---|---|\n"
+        "| `chunk` | `{\"chunk\": \"texto...\"}` | Fragmento de texto de la respuesta |\n"
+        "| `done` | `{\"done\": true, \"severity\": 2.7, \"should_close\": false, "
+        "\"closing_kind\": null, \"metrics\": {...}}` | Fin del stream con métricas |\n"
+        "| `error` | `{\"error\": \"mensaje\"}` | Error durante la generación |\n\n"
+        "La lógica de heurística, severidad y cierre automático es idéntica al endpoint síncrono."
+    ),
+    response_description="Stream SSE (`text/event-stream`) con chunks de texto y evento `done` final.",
+    responses={
+        400: {"description": "Mensaje vacío o sesión ya cerrada"},
+        404: {"description": "Sesión, perfil o escenario no encontrado"},
+    },
+)
 def converse_stream(
     session_id: UUID,
     payload: ConversationInput,
@@ -829,7 +874,18 @@ def converse_stream(
     )
 
 
-@router.get("/{session_id}/history", response_model=list[ConversationMessageResponse])
+@router.get(
+    "/{session_id}/history",
+    response_model=list[ConversationMessageResponse],
+    summary="Obtener historial de conversación",
+    description=(
+        "Devuelve la transcripción completa de una sesión, ordenada cronológicamente. "
+        "Incluye todos los mensajes del usuario (`role=trainee`) y del personaje simulado "
+        "(`role=patient`), con su severidad registrada, flags conductuales y métricas de IA."
+    ),
+    response_description="Lista completa de mensajes de la sesión en orden cronológico.",
+    responses={404: {"description": "Sesión no encontrada"}},
+)
 def get_conversation_history(
     session_id: UUID,
     db: Session = Depends(get_db),

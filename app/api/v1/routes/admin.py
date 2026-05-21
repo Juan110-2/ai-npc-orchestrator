@@ -60,16 +60,26 @@ def _require_admin(
     return user
 
 
-@router.get("/me", response_model=UserProfileResponse)
+@router.get(
+    "/me",
+    response_model=UserProfileResponse,
+    summary="Obtener perfil propio 🔒",
+    description=(
+        "Devuelve el perfil del usuario autenticado, incluyendo su rol en la plataforma. "
+        "El frontend lo usa para conocer el rol real (`student`, `teacher`, `admin`) "
+        "sin depender del campo `user_metadata` de Supabase Auth.\n\n"
+        "Requiere un JWT válido de Supabase (`Authorization: Bearer <token>`)."
+    ),
+    response_description="Perfil del usuario autenticado con su rol.",
+    responses={
+        401: {"description": "No autenticado o token sin campo `sub`"},
+        404: {"description": "Perfil de usuario no encontrado en la base de datos"},
+    },
+)
 def get_my_profile(
     db: Session = Depends(get_db),
     payload: dict | None = Depends(verify_supabase_jwt),
 ):
-    """
-    Devuelve el perfil del usuario autenticado (rol incluido).
-    Usado por el frontend para conocer el rol real sin depender de user_metadata.
-    Ruta: GET /admin/me  (separada de /admin/users/{id} para evitar conflicto de paths)
-    """
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No autenticado")
 
@@ -84,23 +94,49 @@ def get_my_profile(
     return user
 
 
-@router.get("/users", response_model=list[UserProfileResponse])
+@router.get(
+    "/users",
+    response_model=list[UserProfileResponse],
+    summary="Listar todos los usuarios 🔒 admin",
+    description=(
+        "Devuelve la lista completa de usuarios registrados en la plataforma. "
+        "Solo accesible para usuarios con rol `admin`."
+    ),
+    response_description="Lista de usuarios con id, email, nombre y rol.",
+    responses={
+        401: {"description": "No autenticado"},
+        403: {"description": "Se requiere rol `admin`"},
+    },
+)
 def list_users(
     db: Session = Depends(get_db),
     _admin: UserProfile = Depends(_require_admin),
 ):
-    """Lista todos los usuarios registrados en la plataforma."""
     return UsersRepository.list_all(db)
 
 
-@router.patch("/users/{user_id}", response_model=UserProfileResponse)
+@router.patch(
+    "/users/{user_id}",
+    response_model=UserProfileResponse,
+    summary="Actualizar usuario 🔒 admin",
+    description=(
+        "Actualiza el rol o nombre de un usuario. Solo accesible para `admin`.\n\n"
+        "**Restricción**: un administrador no puede cambiar su propio rol a uno inferior."
+    ),
+    response_description="Usuario actualizado.",
+    responses={
+        400: {"description": "El admin intenta quitarse su propio rol"},
+        401: {"description": "No autenticado"},
+        403: {"description": "Se requiere rol `admin`"},
+        404: {"description": "Usuario no encontrado"},
+    },
+)
 def update_user(
     user_id: UUID,
     body: UserProfileUpdate,
     db: Session = Depends(get_db),
     admin: UserProfile = Depends(_require_admin),
 ):
-    """Actualiza el rol o nombre de un usuario. Un admin no puede quitarse su propio rol."""
     if user_id == admin.id and body.role and body.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -119,10 +155,23 @@ def update_user(
     return updated
 
 
-@router.get("/students", response_model=list[UserProfileResponse])
+@router.get(
+    "/students",
+    response_model=list[UserProfileResponse],
+    summary="Listar estudiantes 🔒 teacher / admin",
+    description=(
+        "Devuelve todos los usuarios con rol `student`. "
+        "Accesible para `teacher` y `admin`. "
+        "Útil para que un docente seleccione a quién asignar una sesión."
+    ),
+    response_description="Lista de usuarios con rol `student`.",
+    responses={
+        401: {"description": "No autenticado"},
+        403: {"description": "Se requiere rol `teacher` o `admin`"},
+    },
+)
 def list_students(
     db: Session = Depends(get_db),
     _caller: UserProfile = Depends(_require_teacher_or_admin),
 ):
-    """Lista todos los usuarios con rol student. Accesible para teacher y admin."""
     return UsersRepository.list_by_role(db, role="student")
