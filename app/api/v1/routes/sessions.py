@@ -162,6 +162,7 @@ class TimeFlushBody(BaseModel):
 
 
 @router.patch("/{session_id}/time", response_model=SessionResponse)
+@router.post("/{session_id}/time", response_model=SessionResponse)
 def flush_time(
     session_id: UUID,
     body: TimeFlushBody,
@@ -172,6 +173,7 @@ def flush_time(
     Marks time_source='explicit' on first call.
     Ignored silently if the session is already closed.
     delta_seconds capped at 600 (10 min) per flush to prevent corruption.
+    POST alias exists because navigator.sendBeacon only supports POST.
     """
     session = SessionRepository.add_time_delta(db, session_id, body.delta_seconds)
     if not session:
