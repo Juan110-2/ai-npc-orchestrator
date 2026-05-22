@@ -9,6 +9,43 @@ from app.api.v1.routes import (
 _DESCRIPTION = """
 API del orquestador de simulaciones con personajes NPC impulsados por IA.
 
+## Flujo típico de uso
+
+**Configuración previa** (una sola vez — rol `teacher` o `admin`):
+
+```
+1. POST /auth/login      → obtener JWT
+2. POST /scenarios/      → crear escenario (situación, severidad inicial, riesgos)
+3. POST /profiles/       → crear perfil del NPC (identidad, comportamiento, severidad)
+```
+
+**Inicio de sesión** (rol `teacher` o `admin`, asigna la sesión al estudiante):
+
+```
+1. POST /auth/login                          → obtener JWT
+2. POST /sessions/start                      → crear sesión (scenario_id + profile_id + user_id del estudiante)
+```
+
+> `teacher` y `admin` pueden colocar su propio `user_id` en `user_id` para asignarse la sesión a sí mismos y probar el flujo completo.
+
+**Práctica** (rol `student` — todo ocurre a través de la sesión asignada):
+
+```
+1. POST /auth/login                          → obtener JWT
+2. GET  /sessions/                           → consultar sesiones propias
+3. POST /conversation/{session_id}/turn      → enviar mensajes al NPC (turno a turno)
+   └── streaming: GET /conversation/{session_id}/stream  (SSE, text/event-stream)
+4. PATCH /sessions/{session_id}/time         → reportar tiempo de práctica acumulado
+5. PATCH /sessions/{session_id}/end          → cerrar sesión (success | crisis | inappropriate)
+```
+
+**Evaluación** (rol `teacher` o `admin`):
+
+```
+1. GET /evaluations/{session_id}             → revisar métricas automáticas generadas al cerrar
+2. PUT /evaluations/{session_id}             → completar rúbrica con scores y feedback
+```
+
 ## Recursos principales
 
 | Recurso | Descripción |
