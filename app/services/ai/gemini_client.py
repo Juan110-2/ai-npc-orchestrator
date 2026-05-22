@@ -2,9 +2,39 @@ import time
 from typing import Generator
 
 import google.generativeai as genai
+from google.generativeai.types import HarmBlockThreshold, HarmCategory
 
 from app.core.config import GEMINI_API_KEY
 from app.services.ai.base import AIClient, AIResponse, StreamResult
+
+# Umbrales permisivos para simulación clínica (psicología / salud mental).
+# Sin esto Gemini bloquea contenido terapéutico con finish_reason=SAFETY.
+_CLINICAL_SAFETY_SETTINGS = {
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+}
+
+
+def _safe_chunk_text(chunk) -> str | None:
+    """Extrae texto de un chunk de streaming sin lanzar ValueError por safety blocks."""
+    try:
+        return chunk.text
+    except (ValueError, AttributeError):
+        return None
+
+
+def _safe_response_text(response) -> str:
+    """Extrae texto de una respuesta completa sin lanzar ValueError por safety blocks."""
+    try:
+        return response.text or ""
+    except (ValueError, AttributeError):
+        candidates = getattr(response, "candidates", [])
+        if candidates and getattr(candidates[0], "content", None):
+            parts = getattr(candidates[0].content, "parts", [])
+            return "".join(getattr(p, "text", "") for p in parts)
+        return ""
 
 
 class GeminiClient(AIClient):
@@ -36,6 +66,7 @@ class GeminiClient(AIClient):
             model_name=self.model,
             generation_config=self._generation_config,
             system_instruction=system_prompt,
+            safety_settings=_CLINICAL_SAFETY_SETTINGS,
         )
 
     def _build_contents(
@@ -65,7 +96,7 @@ class GeminiClient(AIClient):
         response = model_instance.generate_content(contents)
         latency_ms = (time.perf_counter() - t0) * 1000
 
-        content = response.text or ""
+        content = _safe_response_text(response)
         usage = getattr(response, "usage_metadata", None)
 
         return AIResponse(
@@ -94,7 +125,7 @@ class GeminiClient(AIClient):
 
         stream = model_instance.generate_content(contents, stream=True)
         for chunk in stream:
-            text_part = getattr(chunk, "text", None)
+            text_part = _safe_chunk_text(chunk)
             if text_part:
                 if first_chunk:
                     ttft_ms = (time.perf_counter() - t0) * 1000
