@@ -41,7 +41,7 @@ def _classify_exception(exc: BaseException) -> str:
     msg = str(exc).lower()
     if "timeout" in name or "timeout" in msg:
         return "timeout"
-    if "rate" in msg or "ratelimit" in name or "429" in msg:
+    if "rate" in msg or "ratelimit" in name or "429" in msg or "503" in msg or "unavailable" in msg or "high demand" in msg:
         return "rate_limit"
     if "auth" in name or "401" in msg or "unauthorized" in msg or "forbidden" in msg or "403" in msg:
         return "auth_error"

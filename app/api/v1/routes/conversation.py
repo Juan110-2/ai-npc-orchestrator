@@ -32,7 +32,7 @@ heuristics = ConversationHeuristics()
 _MAX_CLOSING_TURNS = 3
 _EVALUATOR_SCALE = 0.3
 _ABUSE_HISTORY_WINDOW = 10
-_PARALLEL_TIMEOUT_S = 10.0
+_PARALLEL_TIMEOUT_S = 20.0
 _MAX_RESPONSE_CHARS = 8_000
 # Mensajes recientes para contexto de IA y lógica de cierre.
 # Con _MAX_CLOSING_TURNS=3, el ciclo de cierre cabe holgadamente en este límite.
@@ -139,7 +139,7 @@ def _fetch_parallel_inputs(
         try:
             return heuristics.classify(normalized, db=d, session_id=session_id)
         except Exception:
-            logger.warning("Tarea semántica falló", exc_info=True)
+            logger.warning("[classifier] Tarea semántica falló (session=%s)", session_id, exc_info=True)
             return None
         finally:
             d.close()
@@ -163,7 +163,7 @@ def _fetch_parallel_inputs(
             )
             return abuse_count >= 2
         except Exception:
-            logger.warning("Tarea de reincidencia falló", exc_info=True)
+            logger.warning("[recurrence] Tarea de reincidencia falló (session=%s)", session_id, exc_info=True)
             return False
         finally:
             d.close()
@@ -176,7 +176,7 @@ def _fetch_parallel_inputs(
                 return 0.0
             return float(data.get("overall_impact", 0.0))
         except Exception:
-            logger.warning("Tarea de evaluación de intervención falló", exc_info=True)
+            logger.warning("[evaluator] Tarea de evaluación falló (session=%s)", session_id, exc_info=True)
             return 0.0
         finally:
             d.close()
@@ -192,19 +192,19 @@ def _fetch_parallel_inputs(
         try:
             semantic_result = fut_sem.result(timeout=_PARALLEL_TIMEOUT_S)
         except FuturesTimeoutError:
-            logger.warning("Timeout en clasificación semántica")
+            logger.warning("[classifier] Timeout en clasificación semántica (session=%s)", session_id)
             semantic_result = None
         except Exception:
-            logger.warning("Error en clasificación semántica", exc_info=True)
+            logger.warning("[classifier] Error en clasificación semántica (session=%s)", session_id, exc_info=True)
             semantic_result = None
 
         try:
             impact = fut_evl.result(timeout=_PARALLEL_TIMEOUT_S)
         except FuturesTimeoutError:
-            logger.warning("Timeout en evaluación de intervención")
+            logger.warning("[evaluator] Timeout en evaluación de intervención (session=%s)", session_id)
             impact = 0.0
         except Exception:
-            logger.warning("Error en evaluación de intervención", exc_info=True)
+            logger.warning("[evaluator] Error en evaluación de intervención (session=%s)", session_id, exc_info=True)
             impact = 0.0
 
         repeat_abuse = False
@@ -212,9 +212,9 @@ def _fetch_parallel_inputs(
             try:
                 repeat_abuse = fut_rec.result(timeout=_PARALLEL_TIMEOUT_S)
             except FuturesTimeoutError:
-                logger.warning("Timeout en detección de reincidencia")
+                logger.warning("[recurrence] Timeout en detección de reincidencia (session=%s)", session_id)
             except Exception:
-                logger.warning("Error en detección de reincidencia", exc_info=True)
+                logger.warning("[recurrence] Error en detección de reincidencia (session=%s)", session_id, exc_info=True)
     finally:
         # cancel_futures disponible desde Python 3.9; fallback para versiones anteriores.
         try:
@@ -266,11 +266,14 @@ def _apply_severity(
 
     b_min, b_max = _get_behavior_range(profile)
     session.current_severity = max(b_min, min(b_max, float(session.current_severity)))
-    # FIX F: rollback explícito si el commit falla.
     try:
         db.commit()
     except Exception:
         db.rollback()
+        logger.error(
+            "[_apply_severity] Falló commit de severidad (session=%s, sev=%.2f)",
+            session.id, session.current_severity, exc_info=True,
+        )
         raise
 
 
@@ -368,13 +371,13 @@ def _finalize_session(session, ctx: TurnContext, db: Session) -> None:
         db.commit()
     except Exception:
         db.rollback()
-        logger.error("[_finalize_session] Falló commit al cerrar sesión", exc_info=True)
+        logger.error("[_finalize_session] Falló commit (session=%s)", session.id, exc_info=True)
         raise
     try:
         finalize_session_time(db, session)
         db.commit()
     except Exception:
-        logger.error("[_finalize_session] Error finalizando tiempo", exc_info=True)
+        logger.error("[_finalize_session] Error finalizando tiempo (session=%s)", session.id, exc_info=True)
 
 
 def _finalize_session_in_generator(
@@ -402,14 +405,14 @@ def _finalize_session_in_generator(
     except Exception:
         gen_db.rollback()
         logger.error(
-            "[_finalize_session_in_generator] Falló commit al cerrar sesión", exc_info=True
+            "[_finalize_session_in_generator] Falló commit (session=%s)", session_id, exc_info=True
         )
         return
     try:
         finalize_session_time(gen_db, sess_obj)
         gen_db.commit()
     except Exception:
-        logger.error("[_finalize_session_in_generator] Error finalizando tiempo", exc_info=True)
+        logger.error("[_finalize_session_in_generator] Error finalizando tiempo (session=%s)", session_id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +429,24 @@ def _process_turn(
     Núcleo compartido de converse y converse_stream: persiste el mensaje del
     trainee, ejecuta tareas paralelas, actualiza severidad y computa estado de cierre.
     """
+    try:
+        return _process_turn_inner(session, profile, user_input, db)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error(
+            "[_process_turn] Error inesperado procesando turno (session=%s)",
+            session.id, exc_info=True,
+        )
+        raise
+
+
+def _process_turn_inner(
+    session,
+    profile,
+    user_input: str,
+    db: Session,
+) -> TurnContext:
     b_min, b_max = _get_behavior_range(profile)
     previous_severity = float(session.current_severity)
     base_severity = float(
@@ -785,6 +806,8 @@ def converse_stream(
                         latency_ms = stream_result.latency_ms
                         ttft_ms = stream_result.ttft_ms
                         log_ctx.record_stream_result(stream_result, accumulated)
+                    elif stream_error is not None:
+                        log_ctx.record_error(stream_error)
 
             # FIX D: si el stream falló, emitir error y persistir parcial si hay contenido.
             if stream_error is not None:

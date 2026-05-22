@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime, timezone
 
+from sqlalchemy import func
+
 from app.api.v1.deps import get_db, optional_jwt
+from app.models.ai_call_log import AICallLog
 from app.schemas.sessions import SessionCreate, SessionResponse, PaginatedSessionsResponse
 from app.repositories.sessions_repository import SessionRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -14,6 +17,31 @@ from app.repositories.scenario_repository import ScenarioRepository
 from app.repositories.users_repository import UsersRepository
 from app.services.evaluation_service import run_auto_evaluation
 from app.services.session_time_service import finalize_session_time
+
+
+def _last_model_map(db: Session, session_ids: list) -> dict[str, str]:
+    """Batch query: returns {session_id_str: model} for the most recent ok call."""
+    if not session_ids:
+        return {}
+    latest = (
+        db.query(
+            AICallLog.session_id,
+            func.max(AICallLog.created_at).label("max_ts"),
+        )
+        .filter(AICallLog.session_id.in_(session_ids), AICallLog.status == "ok")
+        .group_by(AICallLog.session_id)
+        .subquery()
+    )
+    rows = (
+        db.query(AICallLog.session_id, AICallLog.model)
+        .join(
+            latest,
+            (AICallLog.session_id == latest.c.session_id)
+            & (AICallLog.created_at == latest.c.max_ts),
+        )
+        .all()
+    )
+    return {str(r.session_id): r.model for r in rows}
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -97,7 +125,14 @@ def list_sessions(
     offset = (page - 1) * limit
     total, items = _paginated_sessions(db, payload, view, status, limit, offset)
     pages = max(1, math.ceil(total / limit))
-    return PaginatedSessionsResponse(items=items, total=total, page=page, pages=pages, limit=limit)
+    model_map = _last_model_map(db, [s.id for s in items])
+    session_items = [
+        SessionResponse.model_validate(s).model_copy(
+            update={"last_ai_model": model_map.get(str(s.id))}
+        )
+        for s in items
+    ]
+    return PaginatedSessionsResponse(items=session_items, total=total, page=page, pages=pages, limit=limit)
 
 
 

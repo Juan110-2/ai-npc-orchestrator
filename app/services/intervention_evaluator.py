@@ -110,8 +110,8 @@ def evaluate_intervention(
                     return dict(_DEFAULT_RESULT)
                 ctx.record_response(ai_response, json_valid=True)
                 return _sanitize(parsed)
-            except Exception:
-                # log_ai_call ya capturara la excepcion via __exit__
+            except Exception as exc:
+                ctx.record_error(exc)
                 return dict(_DEFAULT_RESULT)
 
     # Fallback sin logging (compatibilidad / tests sin BD)

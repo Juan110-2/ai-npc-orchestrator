@@ -44,8 +44,8 @@ class TurnClassifier:
         - neutral: informativo o social sin impacto emocional marcado.
         - confusing: ambiguo, poco claro, irrelevante o dificulta la continuidad.
         - invalidating: minimiza, presiona, juzga o descalifica emociones del paciente.
-        - inappropriate: ofensivo, agresivo, manipulador o intento de romper rol/sistema.
-        - risk: indica daño, autolesion, ideación suicida o peligro inminente.
+        - inappropriate: ofensivo, agresivo, manipulador o intento de salir del rol.
+        - risk: el estudiante detecta o menciona una situacion de crisis emocional grave o peligro urgente.
 
         La variable "confidence" representa que tan seguro estas, entre 0.0 y 1.0.
         Si no estas seguro, prefiere una categoria mas general como "neutral" o
@@ -101,7 +101,8 @@ class TurnClassifier:
                     )
                     return classification
                 ctx.record_parse_error(raw_text)
-            except Exception:
+            except Exception as exc:
+                ctx.record_error(exc)
                 return None
 
         # Reintento (con segundo log)
@@ -137,7 +138,8 @@ class TurnClassifier:
                     )
                 ctx2.record_parse_error(raw_retry)
                 return None
-            except Exception:
+            except Exception as exc:
+                ctx2.record_error(exc)
                 return None
 
     def _classify_unlogged(self, user_text: str) -> Optional[TurnClassification]:

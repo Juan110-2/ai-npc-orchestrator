@@ -12,7 +12,7 @@ pydantic
 
 # Clientes de IA
 openai                        # OpenAI + DeepSeek (API compatible)
-google-generativeai           # Google Gemini
+google-genai                  # Google Gemini (SDK unificado)
 
 # Autenticación JWT (Supabase)
 python-jose[cryptography]

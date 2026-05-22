@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db
 from app.core.config import SUPABASE_JWT_SECRET
+from app.models.ai_call_log import AICallLog
 from app.models.user_profile import UserProfile
 from app.repositories.ai_call_logs_repository import AICallLogsRepository
 from app.repositories.users_repository import UsersRepository
@@ -147,29 +148,30 @@ def get_provider_metrics(
 )
 def list_recent_calls(
     db: Session = Depends(get_db),
-    limit: int = Query(
-        default=100,
-        ge=1,
-        le=1000,
-        description="Número de registros a devolver (1–1000).",
-    ),
-    provider: Optional[str] = Query(
-        default=None,
-        description="Filtrar por proveedor: `openai`, `gemini`, `deepseek`, etc.",
-    ),
+    limit: int = Query(default=15, ge=1, le=100, description="Registros por página (1–100)."),
+    offset: int = Query(default=0, ge=0, description="Desplazamiento para paginación."),
+    provider: Optional[str] = Query(default=None, description="Filtrar por proveedor."),
+    purpose: Optional[str] = Query(default=None, description="Filtrar por propósito."),
+    session_id: Optional[str] = Query(default=None, description="Filtrar por session ID (prefijo o UUID completo)."),
     _: Optional[UserProfile] = Depends(_require_admin),
 ):
-    rows = (
-        AICallLogsRepository.list_by_provider(db, provider, limit=limit)
-        if provider else AICallLogsRepository.list_recent(db, limit=limit)
-    )
-    return [
+    from sqlalchemy import cast, Text
+    q = db.query(AICallLog)
+    if provider:
+        q = q.filter(AICallLog.provider == provider)
+    if purpose:
+        q = q.filter(AICallLog.purpose == purpose)
+    if session_id:
+        q = q.filter(cast(AICallLog.session_id, Text).ilike(f"{session_id.strip()}%"))
+    total = q.count()
+    rows = q.order_by(AICallLog.created_at.desc()).offset(offset).limit(limit).all()
+    items = [
         {
             "id": str(r.id),
             "session_id": str(r.session_id) if r.session_id else None,
             "provider": r.provider, "model": r.model,
             "purpose": r.purpose, "call_mode": r.call_mode,
-            "status": r.status,
+            "status": r.status, "category": r.category,
             "tokens_input": r.tokens_input, "tokens_output": r.tokens_output,
             "latency_ms": r.latency_ms, "ttft_ms": r.ttft_ms,
             "json_valid": r.json_valid,
@@ -179,6 +181,7 @@ def list_recent_calls(
         }
         for r in rows
     ]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get(

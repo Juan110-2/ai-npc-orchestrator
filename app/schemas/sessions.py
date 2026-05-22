@@ -101,6 +101,10 @@ class SessionResponse(BaseModel):
         None,
         description="Fecha y hora de cierre (UTC). `null` si la sesión sigue activa.",
     )
+    last_ai_model: Optional[str] = Field(
+        None,
+        description="Último modelo de IA usado en esta sesión (desde ai_call_logs).",
+    )
 
     model_config = {
         "from_attributes": True,
