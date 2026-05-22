@@ -311,12 +311,14 @@ def list_evaluations(
     user = _get_current_user(db, credentials) if SUPABASE_JWT_SECRET else None
 
     StudentProfile = aliased(UserProfile)
+    AssignedByProfile = aliased(UserProfile)
 
     q = (
-        db.query(SessionEvaluation, SessionModel, Profile, StudentProfile)
+        db.query(SessionEvaluation, SessionModel, Profile, StudentProfile, AssignedByProfile)
         .outerjoin(SessionModel, SessionModel.id == SessionEvaluation.session_id)
         .outerjoin(Profile, Profile.id == SessionModel.profile_id)
         .outerjoin(StudentProfile, StudentProfile.id == SessionEvaluation.student_id)
+        .outerjoin(AssignedByProfile, AssignedByProfile.id == SessionModel.assigned_by)
         .order_by(desc(SessionEvaluation.created_at))
     )
 
@@ -328,12 +330,14 @@ def list_evaluations(
 
     rows = q.limit(200).all()
     out = []
-    for (e, s, p_row, student_row) in rows:
+    for (e, s, p_row, student_row, assigned_by_row) in rows:
         out.append({
             "id": str(e.id),
             "session_id": str(e.session_id),
             "student_id": str(e.student_id) if e.student_id else None,
             "student_name": student_row.full_name if student_row else None,
+            "assigned_by_id": str(s.assigned_by) if s and s.assigned_by else None,
+            "assigned_by_name": assigned_by_row.full_name if assigned_by_row else None,
             "status": e.status,
             "patient_name": p_row.name if p_row else None,
             "started_at": s.started_at.isoformat() if s and s.started_at else None,
