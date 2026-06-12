@@ -1,34 +1,19 @@
 """
-Endpoints de evaluacion pedagogica (Capitulo 5).
-
-Trazabilidad: cada evaluacion esta vinculada a session_id y student_id.
-El docente (rol teacher o admin) revisa la transcripcion + metricas
-automaticas y completa la rubrica. El estudiante puede leer su propia
-evaluacion una vez submitted.
-
-Endpoints:
-  POST /evaluation/{session_id}/auto   - recalcula metricas automaticas
-  GET  /evaluation/{session_id}        - lee evaluacion completa
-  PUT  /evaluation/{session_id}        - teacher/admin llena scores + feedback
-  GET  /evaluation/student/{id}        - historial de un estudiante
-  GET  /evaluation/rubric/active       - rubrica vigente
+Endpoints de evaluación pedagógica.
 """
 import logging
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, resolve_authenticated_user
 from app.core.config import SUPABASE_JWT_SECRET
 from app.models.user_profile import UserProfile
-from app.repositories.evaluations_repository import (
-    EvaluationsRepository,
-    RubricsRepository,
-)
+from app.repositories.evaluations_repository import EvaluationsRepository, RubricsRepository
 from app.repositories.sessions_repository import SessionRepository
 from app.services.evaluation.service import compute_overall_score, run_auto_evaluation
 
@@ -42,7 +27,6 @@ def _get_current_user(
     db: Session,
     credentials: Optional[HTTPAuthorizationCredentials],
 ) -> Optional[UserProfile]:
-    """Si auth desactivada (modo dev), devuelve None. Si activa, devuelve UserProfile."""
     return resolve_authenticated_user(
         db=db,
         credentials=credentials,
@@ -72,7 +56,6 @@ def _authorize_evaluation_read(
     evaluation,
     session,
 ) -> None:
-    """Valida el acceso de lectura antes de generar efectos secundarios."""
     if not SUPABASE_JWT_SECRET:
         return
 
@@ -85,12 +68,45 @@ def _authorize_evaluation_read(
         )
 
 
-# ----- Schemas ---------------------------------------------------------------
-
 class TeacherEvaluationInput(BaseModel):
     scores: dict[str, float] = Field(default_factory=dict)
     teacher_feedback: Optional[str] = None
-    status: str = "submitted"  # draft | submitted
+    status: str = "submitted"
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "scores": {"escucha_activa": 4.5, "empatía": 4.0},
+                "teacher_feedback": "Buena validación emocional, pero faltó profundizar.",
+                "status": "submitted",
+            }
+        }
+    }
+
+
+class RubricResponse(BaseModel):
+    id: str
+    version: str
+    name: str
+    description: str | None = None
+    criteria: dict
+    is_active: bool
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "f6a7b8c9-d0e1-2345-abcd-456789012345",
+                "version": "v1",
+                "name": "Rúbrica base",
+                "description": "Rúbrica principal para evaluación docente.",
+                "criteria": {
+                    "escucha_activa": {"weight": 0.3},
+                    "empatía": {"weight": 0.4},
+                },
+                "is_active": True,
+            }
+        }
+    }
 
 
 class EvaluationResponse(BaseModel):
@@ -107,6 +123,90 @@ class EvaluationResponse(BaseModel):
     created_at: Optional[str]
     updated_at: Optional[str]
     submitted_at: Optional[str]
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+                "session_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                "student_id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                "evaluator_id": "f7a8b9c0-d1e2-3456-abcd-567890123456",
+                "rubric_id": "f6a7b8c9-d0e1-2345-abcd-456789012345",
+                "status": "submitted",
+                "automatic_metrics": {"turns_total": 8, "closing_kind": "success"},
+                "scores": {"escucha_activa": 4.5, "empatía": 4.0},
+                "teacher_feedback": "Buena validación emocional, pero faltó profundizar.",
+                "overall_score": 4.2,
+                "created_at": "2025-05-10T09:35:00+00:00",
+                "updated_at": "2025-05-10T09:40:00+00:00",
+                "submitted_at": "2025-05-10T09:40:00+00:00",
+            }
+        }
+    }
+
+
+class EvaluationListItemResponse(BaseModel):
+    id: str
+    session_id: str
+    student_id: str | None = None
+    student_name: str | None = None
+    assigned_by_id: str | None = None
+    assigned_by_name: str | None = None
+    status: str
+    patient_name: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    automatic_metrics: dict
+    scores: dict
+    submitted_at: str | None = None
+    created_at: str | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+                "session_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                "student_id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                "student_name": "Ana Martínez",
+                "assigned_by_id": "f7a8b9c0-d1e2-3456-abcd-567890123456",
+                "assigned_by_name": "Docente Demo",
+                "status": "submitted",
+                "patient_name": "María García",
+                "started_at": "2025-05-10T09:00:00+00:00",
+                "ended_at": "2025-05-10T09:30:00+00:00",
+                "automatic_metrics": {"turns_total": 8, "closing_kind": "success"},
+                "scores": {"escucha_activa": 4.5, "empatía": 4.0},
+                "submitted_at": "2025-05-10T09:40:00+00:00",
+                "created_at": "2025-05-10T09:35:00+00:00",
+            }
+        }
+    }
+
+
+class StudentEvaluationHistoryItemResponse(BaseModel):
+    id: str
+    session_id: str
+    status: str
+    automatic_metrics: dict
+    scores: dict
+    teacher_feedback: str | None = None
+    submitted_at: str | None = None
+    created_at: str | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+                "session_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                "status": "submitted",
+                "automatic_metrics": {"turns_total": 8, "closing_kind": "success"},
+                "scores": {"escucha_activa": 4.5, "empatía": 4.0},
+                "teacher_feedback": "Buena validación emocional, pero faltó profundizar.",
+                "submitted_at": "2025-05-10T09:40:00+00:00",
+                "created_at": "2025-05-10T09:35:00+00:00",
+            }
+        }
+    }
 
 
 def _serialize_evaluation(db: Session, ev) -> EvaluationResponse:
@@ -132,21 +232,15 @@ def _serialize_evaluation(db: Session, ev) -> EvaluationResponse:
     )
 
 
-# ----- Endpoints -------------------------------------------------------------
-
 @router.get(
     "/rubric/active",
+    response_model=RubricResponse,
     summary="Obtener rúbrica vigente",
     description=(
         "Devuelve la definición de la rúbrica de evaluación activa. "
-        "Endpoint público — no requiere autenticación. "
-        "El frontend lo usa para renderizar el formulario de evaluación del docente "
-        "y la vista de resultados del estudiante."
+        "Es un endpoint público y el frontend lo usa para renderizar formularios y resultados."
     ),
-    response_description=(
-        "Objeto con `id`, `version`, `name`, `description`, `criteria` (dict con los criterios "
-        "y sus pesos) e `is_active`."
-    ),
+    response_description="Rúbrica activa con criterios y pesos.",
     responses={404: {"description": "No hay rúbrica activa configurada"}},
 )
 def get_active_rubric(db: Session = Depends(get_db)):
@@ -166,18 +260,12 @@ def get_active_rubric(db: Session = Depends(get_db)):
 @router.post(
     "/{session_id}/auto",
     response_model=EvaluationResponse,
-    summary="Recalcular métricas automáticas 🔒 teacher / admin",
+    summary="Recalcular métricas automáticas",
     description=(
-        "Recalcula las métricas automáticas de la sesión y las persiste (upsert) en "
-        "`session_evaluations`. Es idempotente — puede llamarse varias veces sin efectos secundarios.\n\n"
-        "**Métricas calculadas automáticamente:**\n"
-        "- Duración total de la sesión.\n"
-        "- Número de turnos y mensajes.\n"
-        "- Severidad promedio, mínima y máxima durante la sesión.\n"
-        "- Indicadores de cierre (tipo de cierre, severidad final).\n\n"
-        "Se invoca automáticamente al cerrar una sesión via `PATCH /sessions/{id}/end`."
+        "Recalcula las métricas automáticas de una sesión y las persiste en `session_evaluations`. "
+        "Puede ejecutarse varias veces sin efectos secundarios funcionales."
     ),
-    response_description="Evaluación actualizada con las métricas automáticas recalculadas.",
+    response_description="Evaluación actualizada con métricas automáticas recalculadas.",
     responses={404: {"description": "Sesión no encontrada"}},
 )
 def run_auto(
@@ -194,20 +282,15 @@ def run_auto(
 @router.get(
     "/{session_id}",
     response_model=EvaluationResponse,
-    summary="Obtener evaluación de sesión 🔒",
+    summary="Obtener evaluación de sesión",
     description=(
-        "Devuelve la evaluación completa de una sesión: métricas automáticas, "
-        "puntuaciones de la rúbrica y retroalimentación del docente.\n\n"
-        "**Permisos:**\n"
-        "- `teacher` / `admin`: pueden leer cualquier evaluación.\n"
-        "- `student`: solo puede leer la evaluación de sus propias sesiones.\n"
-        "- Sin auth (modo dev): acceso libre.\n\n"
-        "Si la evaluación no existe aún, se genera automáticamente con las métricas automáticas."
+        "Devuelve la evaluación completa de una sesión. "
+        "Si aún no existe, puede generarse automáticamente con métricas base."
     ),
     response_description="Evaluación de la sesión con métricas automáticas y scores de rúbrica.",
     responses={
-        401: {"description": "Auth requerida (prod mode)"},
-        403: {"description": "El estudiante no es el dueño de esta sesión"},
+        401: {"description": "Auth requerida en modo productivo"},
+        403: {"description": "El estudiante no es dueño de la sesión"},
         404: {"description": "Sesión no encontrada"},
     },
 )
@@ -230,7 +313,6 @@ def get_evaluation(
     )
 
     if not ev:
-        # Auto-crear con metricas solo despues de validar permisos.
         ev = run_auto_evaluation(db, session_id)
         if not ev:
             logger.warning(
@@ -245,22 +327,16 @@ def get_evaluation(
 @router.put(
     "/{session_id}",
     response_model=EvaluationResponse,
-    summary="Enviar evaluación del docente 🔒 teacher / admin",
+    summary="Enviar evaluación del docente",
     description=(
-        "Guarda o actualiza la evaluación del docente sobre una sesión. "
-        "Incluye las puntuaciones por criterio de la rúbrica y la retroalimentación textual.\n\n"
-        "**`status` aceptados:**\n"
-        "- `draft`: guardado parcial, el docente aún no ha finalizado.\n"
-        "- `submitted`: evaluación enviada al estudiante.\n"
-        "- `reviewed`: revisada/confirmada.\n\n"
-        "**Prerrequisito**: la evaluación debe existir. Si no, ejecuta primero "
-        "`POST /evaluation/{session_id}/auto`."
+        "Guarda o actualiza la evaluación del docente sobre una sesión, incluyendo puntajes por criterio "
+        "y retroalimentación textual."
     ),
-    response_description="Evaluación actualizada con los scores y feedback del docente.",
+    response_description="Evaluación actualizada con scores y feedback del docente.",
     responses={
         400: {"description": "Status inválido"},
         403: {"description": "Se requiere rol `teacher` o `admin`"},
-        404: {"description": "Evaluación no existe — ejecutar primero /auto"},
+        404: {"description": "La evaluación no existe; ejecutar primero `/auto`"},
     },
 )
 def submit_teacher_evaluation(
@@ -273,10 +349,9 @@ def submit_teacher_evaluation(
         raise HTTPException(status_code=400, detail="Status invalido")
 
     evaluator_uuid = user.id if user else None
-    # Si no hay user (modo dev) y no nos dieron evaluator, no marcamos
     if evaluator_uuid is None:
-        # Permitir en modo dev con id fantasma null
         from uuid import UUID as _UUID
+
         evaluator_uuid = _UUID("00000000-0000-0000-0000-000000000000")
 
     ev = EvaluationsRepository.submit_teacher_evaluation(
@@ -297,21 +372,13 @@ def submit_teacher_evaluation(
 
 @router.get(
     "/",
-    summary="Listar evaluaciones 🔒",
+    response_model=list[EvaluationListItemResponse],
+    summary="Listar evaluaciones",
     description=(
-        "Devuelve la lista de evaluaciones para la vista principal de `/evaluacion`.\n\n"
-        "**Permisos:**\n"
-        "- `student`: solo sus propias evaluaciones.\n"
-        "- `teacher` / `admin`: todas las evaluaciones.\n"
-        "- Sin auth (modo dev): todas.\n\n"
-        "Filtro opcional `session_ids`: devuelve solo las evaluaciones de las sesiones indicadas "
-        "(se puede repetir el query param para pasar múltiples UUIDs: "
-        "`?session_ids=uuid1&session_ids=uuid2`).\n\n"
-        "Máximo 200 resultados."
+        "Devuelve la lista de evaluaciones para la vista principal del módulo de evaluación. "
+        "Permite filtrar por una o varias sesiones con `session_ids`."
     ),
-    response_description=(
-        "Lista de evaluaciones con datos de sesión, nombre del estudiante y métricas básicas."
-    ),
+    response_description="Lista de evaluaciones con datos de sesión y estudiante.",
 )
 def list_evaluations(
     session_ids: list[UUID] = Query(
@@ -321,8 +388,8 @@ def list_evaluations(
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ):
-    from app.models.session_evaluation import SessionEvaluation
     from app.models.profile import Profile
+    from app.models.session_evaluation import SessionEvaluation
     from app.models.sessions import Session as SessionModel
     from sqlalchemy import desc
     from sqlalchemy.orm import aliased
@@ -371,17 +438,15 @@ def list_evaluations(
 
 @router.get(
     "/student/{student_id}",
-    summary="Historial de evaluaciones de un estudiante 🔒",
+    response_model=list[StudentEvaluationHistoryItemResponse],
+    summary="Historial de evaluaciones de un estudiante",
     description=(
-        "Devuelve el historial completo de evaluaciones de un estudiante específico.\n\n"
-        "**Permisos:**\n"
-        "- `teacher` / `admin`: pueden consultar cualquier estudiante.\n"
-        "- `student`: solo puede consultar su propio historial.\n"
-        "- Sin auth (modo dev): acceso libre."
+        "Devuelve el historial de evaluaciones de un estudiante específico. "
+        "Los estudiantes solo pueden consultar su propio historial."
     ),
-    response_description="Lista de evaluaciones del estudiante con métricas y feedback del docente.",
+    response_description="Lista de evaluaciones del estudiante con métricas y feedback.",
     responses={
-        401: {"description": "Auth requerida (prod mode)"},
+        401: {"description": "Auth requerida en modo productivo"},
         403: {"description": "El estudiante consulta el historial de otro usuario"},
     },
 )

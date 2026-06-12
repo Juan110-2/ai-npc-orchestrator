@@ -1,160 +1,224 @@
 import os
+from typing import get_args, get_origin
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 
-from app.api.v1.routes import (
-    profiles, conversation, scenarios, sessions, admin, metrics, evaluations, auth,
-)
+from app.api.v1.routes import admin, auth, conversation, evaluations, metrics, profiles, scenarios, sessions
 
 _DESCRIPTION = """
 API del orquestador de simulaciones con personajes NPC impulsados por IA.
 
 ## Flujo típico de uso
 
-**Configuración previa** (una sola vez — rol `teacher` o `admin`):
+**Configuración previa** (`teacher` o `admin`):
 
-```
-1. POST /auth/login      → obtener JWT
-2. POST /scenarios/      → crear escenario (situación, severidad inicial, riesgos)
-3. POST /profiles/       → crear perfil del NPC (identidad, comportamiento, severidad)
-```
+1. `POST /auth/login` para obtener JWT
+2. `POST /scenarios/create` para crear el escenario
+3. `POST /profiles/create` para crear el perfil del NPC
 
-**Inicio de sesión** (rol `teacher` o `admin`, asigna la sesión al estudiante):
+**Inicio de sesión de práctica**:
 
-```
-1. POST /auth/login                          → obtener JWT
-2. POST /sessions/start                      → crear sesión (scenario_id + profile_id + user_id del estudiante)
-```
+1. `POST /sessions/start` para vincular perfil, escenario y estudiante
 
-> `teacher` y `admin` pueden colocar su propio `user_id` en `user_id` para asignarse la sesión a sí mismos y probar el flujo completo.
+**Práctica del estudiante**:
 
-**Práctica** (rol `student` — todo ocurre a través de la sesión asignada):
+1. `GET /sessions/` para consultar sesiones disponibles
+2. `POST /conversation/{session_id}` para conversar por turnos
+3. `POST /conversation/{session_id}/stream` para streaming SSE
+4. `PATCH /sessions/{session_id}/time` para reportar tiempo de práctica
+5. `PATCH /sessions/{session_id}/end` para cerrar la sesión
 
-```
-1. POST /auth/login                          → obtener JWT
-2. GET  /sessions/                           → consultar sesiones propias
-3. POST /conversation/{session_id}/turn      → enviar mensajes al NPC (turno a turno)
-   └── streaming: GET /conversation/{session_id}/stream  (SSE, text/event-stream)
-4. PATCH /sessions/{session_id}/time         → reportar tiempo de práctica acumulado
-5. PATCH /sessions/{session_id}/end          → cerrar sesión (success | crisis | inappropriate)
-```
+**Evaluación**:
 
-**Evaluación** (rol `teacher` o `admin`):
-
-```
-1. GET /evaluations/{session_id}             → revisar métricas automáticas generadas al cerrar
-2. PUT /evaluations/{session_id}             → completar rúbrica con scores y feedback
-```
+1. `GET /evaluation/{session_id}` para revisar la evaluación
+2. `PUT /evaluation/{session_id}` para completar scores y feedback docente
 
 ## Recursos principales
 
-| Recurso | Descripción |
-|---|---|
-| **Profiles** | Perfiles de personajes simulados (identidad, comportamiento, rango de severidad) |
-| **Scenarios** | Escenarios de simulación que contextualizan cada sesión (situación, severidad inicial, riesgos) |
-| **Sessions** | Sesiones: vinculan perfil + escenario, rastrean severidad y tiempo acumulado |
-| **Conversation** | Motor de conversación: turno síncrono o streaming SSE en tiempo real |
-| **Admin** | Gestión de usuarios y roles (`student` / `teacher` / `admin`) |
-| **Admin Metrics** | Métricas técnicas de proveedores de IA: latencia, tokens, costos (solo `admin`) |
-| **Evaluation** | Evaluación: métricas automáticas + rúbrica completada por el docente |
+- **Auth**: autenticación y recuperación de acceso
+- **Profiles**: perfiles de personajes simulados
+- **Scenarios**: escenarios clínicos o narrativos
+- **Sessions**: sesiones de práctica y trazabilidad de tiempo/estado
+- **Conversation**: motor conversacional síncrono y streaming SSE
+- **Admin**: usuarios y roles
+- **Admin Metrics**: métricas técnicas de llamadas de IA
+- **Evaluation**: evaluación automática y docente
 
 ## Autenticación
 
-Los endpoints protegidos requieren un JWT de Supabase en el header:
+Los endpoints protegidos requieren un JWT de Supabase:
 
-```
-Authorization: Bearer <token>
-```
+`Authorization: Bearer <token>`
 
-En modo desarrollo (sin `SUPABASE_JWT_SECRET`), la autenticación se omite automáticamente.
+En modo desarrollo, si `SUPABASE_JWT_SECRET` no está configurado, varias rutas omiten autenticación.
 
 ## Severidad emocional
 
 La severidad (`current_severity`) es un valor flotante entre `behavior_min` y `behavior_max`
-del perfil (por defecto `0.0–5.0`). Refleja el estado emocional del personaje simulado (NPC):
+del perfil. Refleja el estado emocional del personaje simulado:
 
-- **0–1**: Calmado, receptivo
-- **2–3**: Moderadamente angustiado
-- **4**: Severamente angustiado
-- **5**: Muy alto — cierre automático de sesión
+- **0 a 1**: calmado, receptivo
+- **2 a 3**: moderadamente angustiado
+- **4**: severamente angustiado
+- **5**: muy alto, con posibilidad de cierre automático
 """
 
 app = FastAPI(
     title="AI NPC Orchestrator",
     version="0.1.0",
     description=_DESCRIPTION,
-    # contact={
-    #     "name": "Trabajo de Grado — AI NPC Orchestrator",
-    #     "email": "juan.moreno.jaramillo@correounivalle.edu.co",
-    # },
     openapi_tags=[
         {
             "name": "auth",
             "description": (
-                "Autenticación de usuarios. "
-                "`POST /auth/login` permite obtener un JWT de Supabase con email y contraseña, "
-                "listo para usar en los endpoints protegidos directamente desde Swagger. "
-                "Otros métodos (Google OAuth, magic link) se inician desde el frontend."
+                "Autenticación de usuarios. Incluye login por email y contraseña, "
+                "registro y recuperación de acceso."
             ),
         },
         {
             "name": "profiles",
             "description": (
-                "Perfiles de personajes simulados (NPC). "
-                "Definen nombre, identidad (`traits`) y comportamiento conversacional (`behavior`), "
-                "incluido el rango de severidad emocional permitido."
+                "Perfiles de personajes simulados (NPC), con identidad, comportamiento "
+                "y rango de severidad emocional."
             ),
         },
         {
             "name": "scenarios",
             "description": (
-                "Escenarios de simulación que contextualizan cada sesión. "
-                "Incluyen la situación narrativa, severidad emocional inicial (1–5), "
-                "indicadores de riesgo y restricciones específicas."
+                "Escenarios de simulación que contextualizan cada sesión, incluyendo "
+                "severidad inicial, riesgos y restricciones."
             ),
         },
         {
             "name": "sessions",
             "description": (
-                "Sesiones de práctica que vinculan un perfil con un escenario. "
-                "Rastrean severidad emocional en tiempo real, tiempo acumulado y estado "
-                "(`active` / `completed` / `terminated`)."
+                "Sesiones de práctica que vinculan perfil y escenario, y registran "
+                "estado, tiempo acumulado y severidad."
             ),
         },
         {
             "name": "conversation",
             "description": (
-                "Motor de conversación con el NPC. Cada turno persiste mensajes, "
-                "recalcula severidad y detecta condiciones de cierre automático. "
-                "Soporta respuesta síncrona y streaming SSE (`text/event-stream`)."
+                "Motor conversacional con el NPC. Soporta flujo síncrono y streaming SSE."
             ),
         },
         {
             "name": "admin",
-            "description": (
-                "Gestión de usuarios y roles. "
-                "`GET /admin/me` requiere cualquier JWT válido; "
-                "el resto de operaciones exige rol `admin`."
-            ),
+            "description": "Gestión de usuarios y roles.",
         },
         {
             "name": "admin-metrics",
             "description": (
-                "Métricas técnicas de los proveedores de IA utilizados en el orquestador "
-                "(latencia p50/p95/p99, TTFT, tokens, tasa de éxito, costo). "
-                "Acceso exclusivo para `admin`."
+                "Métricas técnicas de proveedores de IA: latencia, tokens, costo y tasas de éxito."
             ),
         },
         {
             "name": "evaluation",
             "description": (
-                "Evaluación pedagógica de sesiones. "
-                "Incluye métricas automáticas (calculadas al cerrar la sesión) "
-                "y la rúbrica completada por el docente con puntuaciones y retroalimentación."
+                "Evaluación pedagógica de sesiones: métricas automáticas y rúbrica docente."
             ),
         },
     ],
 )
+
+
+def _resolve_schema_example(schema: dict, components: dict) -> dict | list | str | int | float | bool | None:
+    if not schema:
+        return None
+
+    ref = schema.get("$ref")
+    if ref:
+        name = ref.rsplit("/", 1)[-1]
+        target = components.get("schemas", {}).get(name, {})
+        if "example" in target:
+            return target["example"]
+        return _resolve_schema_example(target, components)
+
+    if "example" in schema:
+        return schema["example"]
+
+    schema_type = schema.get("type")
+    if schema_type == "array":
+        item_example = _resolve_schema_example(schema.get("items", {}), components)
+        return [item_example] if item_example is not None else []
+
+    if schema_type == "object":
+        properties = schema.get("properties", {})
+        built = {}
+        for key, value in properties.items():
+            prop_example = _resolve_schema_example(value, components)
+            if prop_example is not None:
+                built[key] = prop_example
+        return built or None
+
+    return schema.get("default")
+
+
+def _resolve_response_model_example(response_model):
+    if response_model is None:
+        return None
+
+    origin = get_origin(response_model)
+    if origin is list:
+        args = get_args(response_model)
+        if args:
+            item_example = _resolve_response_model_example(args[0])
+            return [item_example] if item_example is not None else []
+        return []
+
+    model_config = getattr(response_model, "model_config", None)
+    if isinstance(model_config, dict):
+        extra = model_config.get("json_schema_extra") or {}
+        if "example" in extra:
+            return extra["example"]
+    return None
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+
+    components = openapi_schema.get("components", {})
+    route_examples = {}
+    for route in app.routes:
+        if not hasattr(route, "path") or not hasattr(route, "methods"):
+            continue
+        response_model = getattr(route, "response_model", None)
+        example = _resolve_response_model_example(response_model)
+        if example is None:
+            continue
+        for method in getattr(route, "methods", []):
+            route_examples[(route.path, method.lower())] = example
+
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        for method, operation in path_item.items():
+            if not isinstance(operation, dict):
+                continue
+            for response in operation.get("responses", {}).values():
+                content = response.get("content", {}).get("application/json")
+                if not content or content.get("example") or content.get("examples"):
+                    continue
+                example = route_examples.get((path, method))
+                if example is None:
+                    example = _resolve_schema_example(content.get("schema", {}), components)
+                if example is not None:
+                    content["example"] = example
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 default_origins = ",".join(
     [

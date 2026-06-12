@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from uuid import UUID
-from typing import List, Optional
 from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 
 class ConversationInput(BaseModel):
@@ -23,13 +24,6 @@ class ConversationInput(BaseModel):
     }
 
 
-class ConversationResponse(BaseModel):
-    reply: str = Field(
-        ...,
-        description="Respuesta generada por la IA en nombre del personaje simulado (NPC).",
-    )
-
-
 class ConversationMessageResponse(BaseModel):
     id: UUID = Field(..., description="Identificador único del mensaje.")
     session_id: UUID = Field(..., description="UUID de la sesión a la que pertenece este mensaje.")
@@ -37,7 +31,7 @@ class ConversationMessageResponse(BaseModel):
         ...,
         description=(
             "Rol del emisor: "
-            "`trainee` (el usuario que practica) o `patient` (el personaje simulado / NPC)."
+            "`trainee` para el usuario que practica o `patient` para el personaje simulado."
         ),
         examples=["patient"],
     )
@@ -46,7 +40,7 @@ class ConversationMessageResponse(BaseModel):
         ...,
         description=(
             "Severidad emocional del NPC en el momento en que se generó este mensaje, "
-            "dentro del rango `behavior_min`–`behavior_max` del perfil."
+            "dentro del rango `behavior_min` a `behavior_max` del perfil."
         ),
         examples=[2.7],
     )
@@ -54,25 +48,23 @@ class ConversationMessageResponse(BaseModel):
         ...,
         description=(
             "Indicadores conductuales detectados en este turno. "
-            "Posibles valores: `abuse` (lenguaje inapropiado), "
-            "`repeat_abuse` (reincidencia de abuso), `risk` (indicador de riesgo)."
+            "Valores comunes: `abuse`, `repeat_abuse`, `risk`."
         ),
         examples=[[]],
     )
     ai_provider: Optional[str] = Field(
         None,
         description=(
-            "Proveedor de IA que generó la respuesta "
-            "(p. ej. `openai`, `gemini`, `deepseek`). "
-            "`null` para mensajes del usuario (`trainee`)."
+            "Proveedor de IA que generó la respuesta. "
+            "Es `null` para mensajes del usuario (`trainee`)."
         ),
         examples=["openai"],
     )
     tokens_used: Optional[int] = Field(
         None,
         description=(
-            "Total de tokens consumidos (entrada + salida) en esta llamada a la IA. "
-            "`null` para mensajes del usuario (`trainee`)."
+            "Total de tokens consumidos por la llamada de IA asociada. "
+            "Es `null` para mensajes del usuario (`trainee`)."
         ),
         examples=[312],
     )

@@ -8,7 +8,7 @@ class ScenarioRepository:
 
     @staticmethod
     def create(db: Session, payload: ScenarioCreate) -> Scenario:
-        scenario = Scenario(**payload.dict())
+        scenario = Scenario(**payload.model_dump())
         db.add(scenario)
         db.commit()
         db.refresh(scenario)
@@ -28,7 +28,7 @@ class ScenarioRepository:
         if not scenario:
             return None
 
-        data = payload.dict(exclude_unset=True)
+        data = payload.model_dump(exclude_unset=True)
         for key, value in data.items():
             setattr(scenario, key, value)
 

@@ -1,16 +1,12 @@
 """
 Endpoints de métricas técnicas para selección y comparación de proveedores de IA.
-
-Acceso:
-  - `admin`: lectura total.
-  - `teacher` y `student`: sin acceso.
-  - sin auth (modo dev): lectura total si `SUPABASE_JWT_SECRET` no está configurado.
 """
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -25,11 +21,190 @@ logger = logging.getLogger(__name__)
 _security = HTTPBearer(auto_error=False)
 
 
+class ProviderMetricsRow(BaseModel):
+    provider: str
+    model: str
+    purpose: str
+    n_calls: int | None = None
+    n_ok: int | None = None
+    n_errors: int | None = None
+    success_rate_pct: float | None = None
+    p50_latency_ms: float | None = None
+    p95_latency_ms: float | None = None
+    p99_latency_ms: float | None = None
+    mean_latency_ms: float | None = None
+    mean_ttft_ms: float | None = None
+    p95_ttft_ms: float | None = None
+    mean_tokens_input: float | None = None
+    mean_tokens_output: float | None = None
+    total_tokens_input: int | None = None
+    total_tokens_output: int | None = None
+    json_valid_rate_pct: float | None = None
+    total_cost_usd: float | None = None
+    mean_cost_usd_per_call: float | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "purpose": "orchestrator",
+                "n_calls": 120,
+                "n_ok": 118,
+                "n_errors": 2,
+                "success_rate_pct": 98.3,
+                "p50_latency_ms": 740.0,
+                "p95_latency_ms": 1320.0,
+                "p99_latency_ms": 1800.0,
+                "mean_latency_ms": 802.0,
+                "mean_ttft_ms": 310.0,
+                "p95_ttft_ms": 540.0,
+                "mean_tokens_input": 420.5,
+                "mean_tokens_output": 155.2,
+                "total_tokens_input": 50460,
+                "total_tokens_output": 18624,
+                "json_valid_rate_pct": 100.0,
+                "total_cost_usd": 2.3145,
+                "mean_cost_usd_per_call": 0.0193,
+            }
+        }
+    }
+
+
+class RecentCallItem(BaseModel):
+    id: str
+    session_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    purpose: str | None = None
+    call_mode: str | None = None
+    status: str | None = None
+    category: str | None = None
+    tokens_input: int | None = None
+    tokens_output: int | None = None
+    latency_ms: float | None = None
+    ttft_ms: float | None = None
+    json_valid: bool | None = None
+    response_chars: int | None = None
+    prompt_chars: int | None = None
+    cost_usd: float | None = None
+    error_detail: str | None = None
+    created_at: str | None = None
+
+
+class RecentCallsResponse(BaseModel):
+    items: list[RecentCallItem]
+    total: int
+    limit: int
+    offset: int
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "items": [
+                    {
+                        "id": "1f2e3d4c-5b6a-7980-1234-abcdef123456",
+                        "session_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "purpose": "orchestrator",
+                        "call_mode": "sync",
+                        "status": "ok",
+                        "category": "conversation",
+                        "tokens_input": 420,
+                        "tokens_output": 160,
+                        "latency_ms": 812.0,
+                        "ttft_ms": 295.0,
+                        "json_valid": True,
+                        "response_chars": 248,
+                        "prompt_chars": 1530,
+                        "cost_usd": 0.0184,
+                        "error_detail": None,
+                        "created_at": "2025-05-10T09:01:45+00:00",
+                    }
+                ],
+                "total": 1,
+                "limit": 15,
+                "offset": 0,
+            }
+        }
+    }
+
+
+class MetricsTotals(BaseModel):
+    total_calls: int
+    total_ok: int
+    total_errors: int
+    total_tokens_in: int
+    total_tokens_out: int
+    total_cost_usd: float
+    n_providers: int
+    n_sessions: int
+
+
+class MetricsByProvider(BaseModel):
+    provider: str
+    model: str
+    n_calls: int
+    n_ok: int | None = None
+    success_rate_pct: float | None = None
+    mean_latency_ms: float | None = None
+    cost_usd: float | None = None
+
+
+class MetricsByPurpose(BaseModel):
+    purpose: str
+    n_calls: int
+    mean_latency_ms: float | None = None
+    json_valid_rate_pct: float | None = None
+
+
+class MetricsSummaryResponse(BaseModel):
+    totals: MetricsTotals
+    by_provider: list[MetricsByProvider]
+    by_purpose: list[MetricsByPurpose]
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "totals": {
+                    "total_calls": 240,
+                    "total_ok": 235,
+                    "total_errors": 5,
+                    "total_tokens_in": 102400,
+                    "total_tokens_out": 36800,
+                    "total_cost_usd": 4.8123,
+                    "n_providers": 3,
+                    "n_sessions": 18,
+                },
+                "by_provider": [
+                    {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "n_calls": 120,
+                        "n_ok": 118,
+                        "success_rate_pct": 98.3,
+                        "mean_latency_ms": 802.0,
+                        "cost_usd": 2.3145,
+                    }
+                ],
+                "by_purpose": [
+                    {
+                        "purpose": "orchestrator",
+                        "n_calls": 160,
+                        "mean_latency_ms": 845.0,
+                        "json_valid_rate_pct": 100.0,
+                    }
+                ],
+            }
+        }
+    }
+
+
 def _require_admin(
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ) -> Optional[UserProfile]:
-    """Permite acceso solo a usuarios con rol `admin`."""
     if not SUPABASE_JWT_SECRET:
         return None
 
@@ -62,12 +237,11 @@ def _require_admin(
 
 @router.get(
     "/providers",
+    response_model=list[ProviderMetricsRow],
     summary="Ver métricas por proveedor",
     description=(
-        "Devuelve métricas agregadas de rendimiento por proveedor, modelo y propósito de llamada, "
-        "a partir de la vista `public.v_provider_metrics`.\n\n"
-        "Incluye conteos, tasas de éxito, latencias, uso de tokens, tiempo al primer token, "
-        "validez de JSON y costo. Puede filtrarse por `purpose`."
+        "Devuelve métricas agregadas por proveedor, modelo y propósito de llamada "
+        "a partir de la vista `public.v_provider_metrics`."
     ),
     response_description="Lista de métricas agrupadas por proveedor, modelo y propósito.",
     responses={
@@ -110,12 +284,11 @@ def get_provider_metrics(
 
 @router.get(
     "/calls",
+    response_model=RecentCallsResponse,
     summary="Listar llamadas recientes a IA",
     description=(
-        "Devuelve el log más reciente de llamadas a proveedores de IA, incluyendo "
-        "estado, modelo, propósito, tokens, latencia, costo y errores.\n\n"
-        "Soporta filtros por proveedor, propósito y `session_id`, además de paginación "
-        "basada en `limit` y `offset`."
+        "Devuelve el log más reciente de llamadas a proveedores de IA, con filtros por proveedor, "
+        "propósito y `session_id`, además de paginación por `limit` y `offset`."
     ),
     response_description="Lista paginada de llamadas recientes a IA.",
     responses={
@@ -174,12 +347,11 @@ def list_recent_calls(
 
 @router.get(
     "/summary",
+    response_model=MetricsSummaryResponse,
     summary="Obtener resumen global de métricas",
     description=(
-        "Devuelve un resumen consolidado de las llamadas a IA en tres niveles:\n\n"
-        "- `totals`: conteos globales, tokens, costo y cantidad de proveedores/sesiones.\n"
-        "- `by_provider`: desglose por proveedor y modelo.\n"
-        "- `by_purpose`: desglose por propósito (`orchestrator`, `classifier`, `evaluator`)."
+        "Devuelve un resumen consolidado de las llamadas a IA en tres niveles: `totals`, "
+        "`by_provider` y `by_purpose`."
     ),
     response_description="Objeto con resumen global, por proveedor y por propósito.",
     responses={

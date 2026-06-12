@@ -78,6 +78,18 @@ class SignupResponse(BaseModel):
         description="Indica si el usuario debe confirmar su correo antes de iniciar sesión.",
     )
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "message": "Cuenta creada. Revisa tu correo para confirmar la cuenta antes de iniciar sesión.",
+                "user_id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                "email": "estudiante@correounivalle.edu.co",
+                "access_token": None,
+                "confirmation_required": True,
+            }
+        }
+    }
+
 
 @router.post(
     "/login",

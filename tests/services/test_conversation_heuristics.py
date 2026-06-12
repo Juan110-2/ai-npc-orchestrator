@@ -99,6 +99,10 @@ class TestConversationHeuristics(unittest.TestCase):
         decision = self.h.decide("?", current_severity=2)
         self.assertEqual(decision.category, MessageCategory.CONFUSING)
 
+    def test_rhetorical_question_with_opening_sign_is_not_treated_as_open_question(self):
+        self.assertFalse(self.h._has_open_question("Te entiendo, ¿no?"))
+        self.assertTrue(self.h._has_open_question("¿Cómo te has sentido esta semana?"))
+
     @patch("app.services.conversation.orchestrator.get_ai_client")
     def test_boundary_mode_calls_ai_when_no_crisis_fallback(self, mock_ai_client):
         mock_ai = mock_ai_client.return_value

@@ -1,261 +1,188 @@
 # AI NPC Orchestrator
 
-Middleware backend for orchestrating AI-driven NPC conversations using configurable profiles.
+Backend del trabajo de grado para orquestar conversaciones con NPC impulsados por IA, administrar sesiones de práctica clínica simulada y registrar trazabilidad técnica y pedagógica.
 
-This project is part of an academic prototyping phase and focuses on validating architecture, logic, and real-time interaction flow between psychological profiles and large language models.
+## Qué hace este backend
 
----
+- expone una API REST con FastAPI
+- administra perfiles de NPC y escenarios clínicos
+- inicia, sigue y cierra sesiones de práctica
+- procesa conversación síncrona y streaming SSE
+- soporta múltiples proveedores de IA
+- registra métricas técnicas por llamada
+- genera evaluación automática y soporta evaluación docente
 
-## Project Goals
+## Alcance actual
 
-- Define structured psychological/personality profiles
-- Inject those profiles into AI model prompts dynamically
-- Orchestrate real-time conversations for NPCs
-- Remain model-agnostic (OpenAI, local models, or other providers)
-- Support future scalability and extensibility
+- este backend vive en un repositorio separado del frontend
+- el flujo principal del orquestador ya está implementado
+- el foco actual es robustecer pruebas, documentación y mantenibilidad sin cambiar la lógica de negocio
 
----
+## Stack principal
 
-## Tech Stack
-
-- Python 3.10+
+- Python 3
 - FastAPI
-- Uvicorn
-- python-dotenv
+- SQLAlchemy
+- PostgreSQL
+- Supabase Auth
 - Pydantic
+- `openai`
+- `google-genai`
 
----
-
-## Project Structure (initial)
+## Estructura actual
 
 ```text
 app/
-	main.py
-	api/v1/routes/
-		profiles.py
-		scenarios.py
-		sessions.py
-		conversation.py
-	services/
-		orchestrator.py
-		intervention_evaluator.py
-		severity_manager.py
-		ai/
-			base.py
-			factory.py
-			openai_client.py
-			local_mock.py
+|-- api/v1/routes/        # Endpoints HTTP
+|-- core/                 # Configuración, auth y base de datos
+|-- models/               # Modelos ORM
+|-- repositories/         # Acceso a datos
+|-- schemas/              # Contratos de entrada y salida
+`-- services/
+    |-- ai/               # Clientes y métricas de IA
+    |-- conversation/     # Núcleo conversacional, heurísticas y streaming
+    |-- evaluation/       # Evaluación automática
+    `-- sessions/         # Tiempo de sesión y utilidades
+scripts/                  # Benchmarks y generación de sesiones
+tests/
+|-- api/                  # Contratos HTTP y rutas
+|-- integration/          # Integración real con base de datos
+`-- services/             # Servicios y lógica puntual
+supabase/                 # Migraciones SQL
 ```
 
----
+## Levantar el proyecto
 
-## Run Locally
+### 1. Crear entorno virtual
 
-1. Create a virtual environment:
-
-```bash
+```powershell
 python -m venv .venv
 ```
 
-2. Activate it (Windows PowerShell):
+### 2. Instalar dependencias
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-3. Install dependencies:
+### 3. Configurar variables de entorno
 
-```bash
-pip install -r requirements.txt
-```
-
-Alternative without activation (Windows):
-
-```powershell
-& ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
-```
-
-4. Configure environment variables (at least):
+Mínimas:
 
 ```env
 DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/ai_npc
 AI_PROVIDER=mock
-# If using OpenAI:
-# AI_PROVIDER=openai
-# OPENAI_API_KEY=your_api_key
 ```
 
-5. Start the API:
+Según proveedor:
 
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+```env
+OPENAI_API_KEY=...
+GEMINI_API_KEY=...
+DEEPSEEK_API_KEY=...
 ```
 
-Alternative without activation (Windows):
+Para auth real:
+
+```env
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_JWT_SECRET=...
+SUPABASE_JWT_ISSUER=...
+SUPABASE_JWKS_URL=...
+```
+
+### 4. Ejecutar la API
 
 ```powershell
-& ".\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-6. Open docs:
+### 5. Abrir Swagger
 
-```text
-http://127.0.0.1:8000/docs
-```
+- `http://127.0.0.1:8000/docs`
+- `http://127.0.0.1:8000/redoc`
 
----
+## Pruebas
 
-## Real-Time Operation and External Service Integration
+Importante: usa el Python del entorno virtual del proyecto.
 
-This API can work in near real-time when called from another service.
-The current conversation endpoint is synchronous request-response:
-
-- Endpoint: `POST /conversation/{session_id}`
-- Input body:
-
-```json
-{
-	"content": "Therapist/trainee message"
-}
-```
-
-- Output: one `ConversationMessageResponse` (patient reply + metadata)
-
-### Current processing flow per message
-
-1. Validate session exists and is open.
-2. Store trainee message.
-3. Evaluate intervention impact.
-4. Adjust emotional severity.
-5. Generate patient response with orchestrator.
-6. Store patient message.
-7. Return response to caller.
-
-### Integration patterns from another service
-
-- Synchronous HTTP (simplest):
-	Caller waits for immediate response from `/conversation/{session_id}`.
-
-- Asynchronous queue/event (more scalable):
-	Caller publishes event, orchestrator processes, response is returned by callback/event.
-
-- Streaming (best real-time UX):
-	Use SSE/WebSocket when partial tokens or progressive delivery are needed.
-
-### Practical recommendation
-
-Start with synchronous HTTP for simplicity, then move to async or streaming if latency/load grows.
-Track p95/p99 latency end-to-end before changing architecture.
-
----
-
-## Benchmark Scripts
-
-### Requisito previo: activar el entorno virtual
-
-Los scripts **deben correr con el Python del `.venv`**, no con el del sistema.
-Si corres `python` directamente sin activar el venv, los módulos de IA no están disponibles.
-
-**Opción A — activar el venv (recomendado para sesiones de trabajo):**
+### Suite principal actual
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python scripts/bench_providers_tagged.py --benchmark-tag bench_v2 --turns 5
+.\.venv\Scripts\python.exe -m unittest tests.services.test_conversation_heuristics tests.services.test_streaming tests.services.test_auth_deps tests.api.test_sessions_routes tests.api.test_evaluations_routes tests.api.test_metrics_routes tests.api.test_admin_routes tests.api.test_conversation_routes tests.api.test_conversation_stream_routes tests.integration.test_repositories_integration
 ```
 
-**Opción B — llamar al ejecutable del venv directamente (sin activar):**
+### Suites por bloque
+
+Heurísticas:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.services.test_conversation_heuristics
+```
+
+Streaming y auth/deps:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.services.test_streaming tests.services.test_auth_deps
+```
+
+Rutas HTTP:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.api.test_sessions_routes tests.api.test_evaluations_routes tests.api.test_metrics_routes tests.api.test_admin_routes tests.api.test_conversation_routes tests.api.test_conversation_stream_routes
+```
+
+Integración real con base de datos:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.integration.test_repositories_integration
+```
+
+Nota: la prueba de evaluaciones reutiliza registros reales existentes en `public.user_profiles`, porque en este proyecto esa tabla depende del flujo real de auth de Supabase y sus llaves foráneas.
+
+### Validación rápida de compilación
+
+```powershell
+.\.venv\Scripts\python.exe -m py_compile app\main.py
+```
+
+Si haces cambios grandes:
+
+```powershell
+.\.venv\Scripts\python.exe -m py_compile app\api\v1\routes\auth.py app\api\v1\routes\sessions.py app\api\v1\routes\evaluations.py app\services\conversation\streaming.py
+```
+
+## Benchmarks y scripts útiles
+
+Benchmark base:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/bench_providers.py
+```
+
+Benchmark con tag:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/bench_providers_tagged.py --benchmark-tag bench_v2 --turns 5
 ```
 
-> Si ves `No module named 'openai'` o `No module named 'google'`, es porque
-> estás usando el Python del sistema. Usa una de las opciones anteriores.
-
----
-
-### `scripts/bench_providers.py` — Benchmark base
-
-Corrida estándar: N llamadas de orchestrator, classifier y evaluator por proveedor.
-Registra en `ai_call_logs` con `purpose=bench`.
+Sesiones clínicas multi-turno:
 
 ```powershell
-# Corrida completa (10 turnos por proveedor)
-python scripts/bench_providers.py
-
-# Personalizar proveedores y turnos
-python scripts/bench_providers.py --providers openai gemini --turns 5
+.\.venv\Scripts\python.exe scripts/generate_clinical_sessions_2x1.py --turns 8
 ```
 
----
+## Estado actual resumido
 
-### `scripts/bench_providers_tagged.py` — Benchmark con tag configurable
+- la lógica conversacional fue desacoplada en `app/services/conversation/`
+- Swagger quedó más alineado con los contratos reales de respuesta
+- ya existe una base de pruebas de servicios, rutas y SSE
+- ya existe una primera capa de integración real con PostgreSQL para repositorios clave
+- todavía conviene seguir ampliando cobertura sobre flujos completos y revisar archivos heredados con codificación inconsistente
+- la verificación agregada más reciente dejó `50` pruebas exitosas
 
-Misma lógica que `bench_providers.py`, pero permite etiquetar cada corrida
-con un nombre diferente para comparar contra el benchmark anterior sin mezclar datos.
+## Archivos de contexto del proyecto
 
-```powershell
-# Corrida equivalente al bench base
-python scripts/bench_providers_tagged.py --benchmark-tag bench
-
-# Corrida nueva para comparar (nuevo modelo, nueva config, etc.)
-python scripts/bench_providers_tagged.py --benchmark-tag bench_v2
-python scripts/bench_providers_tagged.py --benchmark-tag bench_refactor --turns 15
-
-# Solo un proveedor
-python scripts/bench_providers_tagged.py --benchmark-tag bench_openai --providers openai
-```
-
-El resumen final filtra `v_provider_metrics` por el tag indicado.
-Para comparar dos corridas, corre ambas con tags distintos y consulta directamente:
-
-```sql
-select purpose, provider, model, n_calls, success_rate_pct, p50_latency_ms, total_cost_usd
-from public.v_provider_metrics
-where purpose in ('bench', 'bench_v2')
-order by purpose, provider;
-```
-
----
-
-### `scripts/generate_clinical_sessions_2x1.py` — Sesiones clínicas multi-turno
-
-Genera conversaciones clínicas completas cruzando arquetipos de trainee
-con proveedores NPC. El trainee es siempre Gemini. Útil para evaluación
-cualitativa de respuestas NPC y análisis de latencia en contexto real.
-
-**Combinaciones por defecto:** 2 arquetipos × 3 proveedores = 6 sesiones paralelas.
-Las llamadas NPC se registran con `purpose=bench_v2` por defecto.
-
-```powershell
-# Corrida completa (5 turnos por sesión)
-python scripts/generate_clinical_sessions_2x1.py
-
-# Personalizar
-python scripts/generate_clinical_sessions_2x1.py --turns 8
-python scripts/generate_clinical_sessions_2x1.py --turns 10 --benchmark-tag bench_v2
-python scripts/generate_clinical_sessions_2x1.py --archetypes empatico --npc-providers openai
-python scripts/generate_clinical_sessions_2x1.py --workers 2
-```
-
-**Salida generada** en `scripts/transcripts/`:
-
-| Archivo | Descripción |
-|---|---|
-| `session_empatico_openai_<ts>.json` | Transcript completo de una sesión |
-| `all_sessions_<ts>.jsonl` | Todas las sesiones en un solo archivo |
-| `metrics_<ts>.csv` | Métricas agregadas por sesión |
-
-Cada transcript JSON contiene:
-```json
-{
-  "meta": { "archetype": "empatico", "npc_provider": "openai", "npc_ok": 5, ... },
-  "transcript": [
-    { "speaker": "npc",     "content": "Hola, no sé por dónde empezar..." },
-    { "speaker": "trainee", "content": "Entiendo, tómate tu tiempo..." },
-    ...
-  ]
-}
-```
-
-
+- estado vivo del backend: [README-backend.md](D:/Universidad/Trabajo%20de%20Grado/project-information/README-backend.md)
+- estado vivo del frontend: [README-frontend.md](D:/Universidad/Trabajo%20de%20Grado/project-information/README-frontend.md)
