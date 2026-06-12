@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from uuid import UUID
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 UserRole = Literal["student", "teacher", "admin"]
 

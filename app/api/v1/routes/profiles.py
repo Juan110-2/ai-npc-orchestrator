@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.schemas.profile import ProfileCreate, ProfileUpdate, ProfileResponse
+
 from app.api.v1.deps import get_db
 from app.repositories.profile_repository import ProfileRepository
+from app.schemas.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -20,7 +21,7 @@ _404 = {404: {"description": "Perfil no encontrado"}}
         "del personaje, incluyendo el rango de severidad emocional permitido "
         "(`behavior_min` / `behavior_max`)."
     ),
-    response_description="Perfil creado con su UUID asignado y timestamps.",
+    response_description="Perfil creado con UUID y timestamps.",
 )
 def create_profile(
     payload: ProfileCreate,
@@ -46,7 +47,7 @@ def get_profiles(
     "/{profile_id}",
     response_model=ProfileResponse,
     summary="Obtener perfil por ID",
-    description="Devuelve el detalle completo de un perfil de personaje simulado (NPC).",
+    description="Devuelve el detalle completo de un perfil de personaje simulado.",
     response_description="Perfil encontrado.",
     responses=_404,
 )
@@ -66,8 +67,8 @@ def get_profile(
     summary="Actualizar perfil",
     description=(
         "Actualiza parcialmente un perfil de personaje simulado. "
-        "Solo se modifican los campos incluidos en el body; los omitidos conservan su valor actual. "
-        "**Excepción**: `traits` y `behavior` se reemplazan por completo si se envían."
+        "Solo se modifican los campos enviados en el body; los omitidos conservan su valor actual.\n\n"
+        "Nota: `traits` y `behavior` se reemplazan por completo si se envían."
     ),
     response_description="Perfil actualizado.",
     responses=_404,

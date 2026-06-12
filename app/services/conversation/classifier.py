@@ -66,6 +66,8 @@ class TurnClassifier:
             Responde SOLO JSON: {"category":"...","confidence":0.0,"rationale":"..."}
             """
 
+    _TOKEN_FALLBACK_CONFIDENCE = 0.55
+
     def classify(
         self,
         user_text: str,
@@ -83,100 +85,132 @@ class TurnClassifier:
     def _classify_logged(
         self, user_text: str, *, db: Session, session_id: Optional[UUID]
     ) -> Optional[TurnClassification]:
-        # Primer intento (con logging)
-        with log_ai_call(db, purpose="classifier", session_id=session_id) as ctx:
-            ctx.record_prompt_chars(len(self.SYSTEM_PROMPT) + len(user_text))
-            try:
-                ai_response = ctx.client.generate_response(
-                    system_prompt=self.SYSTEM_PROMPT, user_prompt=user_text
-                )
-                raw_text = ai_response.content if ai_response else ""
-                data = self._parse_json(raw_text)
-                if data is not None:
-                    classification = self._build_classification(data)
-                    ctx.record_response(
-                        ai_response,
-                        json_valid=True,
-                        category=classification.category if classification else None,
-                    )
-                    return classification
-                ctx.record_parse_error(raw_text)
-            except Exception as exc:
-                ctx.record_error(exc)
-                return None
+        classification = self._run_logged_attempt(
+            prompt=self.SYSTEM_PROMPT,
+            user_text=user_text,
+            db=db,
+            session_id=session_id,
+        )
+        if classification is not None:
+            return classification
 
-        # Reintento (con segundo log)
-        with log_ai_call(db, purpose="classifier", session_id=session_id) as ctx2:
-            ctx2.record_prompt_chars(len(self.RETRY_PROMPT) + len(user_text))
-            try:
-                ai_retry = ctx2.client.generate_response(
-                    system_prompt=self.RETRY_PROMPT, user_prompt=user_text
-                )
-                raw_retry = ai_retry.content if ai_retry else ""
-                data = self._parse_json(raw_retry)
-                if data is not None:
-                    classification = self._build_classification(data)
-                    ctx2.record_response(
-                        ai_retry,
-                        json_valid=True,
-                        category=classification.category if classification else None,
-                    )
-                    return classification
-                # Token fallback
-                token_category = self._extract_category_token(raw_retry)
-                if token_category:
-                    ctx2.record_response(
-                        ai_retry,
-                        json_valid=False,
-                        category=token_category,
-                    )
-                    return TurnClassification(
-                        category=token_category,
-                        confidence=0.55,
-                        rationale="token_fallback",
-                        source="llm-fallback",
-                    )
-                ctx2.record_parse_error(raw_retry)
-                return None
-            except Exception as exc:
-                ctx2.record_error(exc)
-                return None
+        return self._run_logged_attempt(
+            prompt=self.RETRY_PROMPT,
+            user_text=user_text,
+            db=db,
+            session_id=session_id,
+            allow_token_fallback=True,
+        )
 
     def _classify_unlogged(self, user_text: str) -> Optional[TurnClassification]:
         try:
             ai = get_ai_client()
-            ai_response = ai.generate_response(
-                system_prompt=self.SYSTEM_PROMPT, user_prompt=user_text
+            classification = self._run_unlogged_attempt(
+                ai=ai,
+                prompt=self.SYSTEM_PROMPT,
+                user_text=user_text,
             )
-            raw_text = ai_response.content if ai_response else ""
+            if classification is not None:
+                return classification
+
+            return self._run_unlogged_attempt(
+                ai=ai,
+                prompt=self.RETRY_PROMPT,
+                user_text=user_text,
+                allow_token_fallback=True,
+            )
         except Exception:
             return None
 
+    def _run_logged_attempt(
+        self,
+        *,
+        prompt: str,
+        user_text: str,
+        db: Session,
+        session_id: Optional[UUID],
+        allow_token_fallback: bool = False,
+    ) -> Optional[TurnClassification]:
+        with log_ai_call(db, purpose="classifier", session_id=session_id) as ctx:
+            ctx.record_prompt_chars(len(prompt) + len(user_text))
+            try:
+                ai_response = ctx.client.generate_response(
+                    system_prompt=prompt,
+                    user_prompt=user_text,
+                )
+                return self._consume_logged_response(
+                    ai_response=ai_response,
+                    ctx=ctx,
+                    allow_token_fallback=allow_token_fallback,
+                )
+            except Exception as exc:
+                ctx.record_error(exc)
+                return None
+
+    def _run_unlogged_attempt(
+        self,
+        *,
+        ai,
+        prompt: str,
+        user_text: str,
+        allow_token_fallback: bool = False,
+    ) -> Optional[TurnClassification]:
+        ai_response = ai.generate_response(
+            system_prompt=prompt,
+            user_prompt=user_text,
+        )
+        raw_text = ai_response.content if ai_response else ""
+        return self._classification_from_raw(
+            raw_text,
+            allow_token_fallback=allow_token_fallback,
+        )
+
+    def _consume_logged_response(
+        self,
+        *,
+        ai_response,
+        ctx,
+        allow_token_fallback: bool,
+    ) -> Optional[TurnClassification]:
+        raw_text = ai_response.content if ai_response else ""
+        classification = self._classification_from_raw(
+            raw_text,
+            allow_token_fallback=allow_token_fallback,
+        )
+        if classification is not None:
+            ctx.record_response(
+                ai_response,
+                json_valid=classification.source == "llm",
+                category=classification.category,
+            )
+            return classification
+
+        ctx.record_parse_error(raw_text)
+        return None
+
+    def _classification_from_raw(
+        self,
+        raw_text: str,
+        *,
+        allow_token_fallback: bool = False,
+    ) -> Optional[TurnClassification]:
         data = self._parse_json(raw_text)
         if data is not None:
             return self._build_classification(data)
-
-        try:
-            ai_retry = ai.generate_response(
-                system_prompt=self.RETRY_PROMPT, user_prompt=user_text
-            )
-            raw_retry = ai_retry.content if ai_retry else ""
-        except Exception:
+        if not allow_token_fallback:
             return None
+        return self._build_token_fallback(raw_text)
 
-        data = self._parse_json(raw_retry)
-        if data is not None:
-            return self._build_classification(data)
-
-        token_category = self._extract_category_token(raw_retry)
-        if token_category:
-            return TurnClassification(
-                category=token_category,
-                confidence=0.55,
-                rationale="token_fallback",
-                source="llm-fallback",
-            )
-        return None
+    def _build_token_fallback(self, raw_text: str) -> Optional[TurnClassification]:
+        token_category = self._extract_category_token(raw_text)
+        if not token_category:
+            return None
+        return TurnClassification(
+            category=token_category,
+            confidence=self._TOKEN_FALLBACK_CONFIDENCE,
+            rationale="token_fallback",
+            source="llm-fallback",
+        )
 
     def _build_classification(self, data: dict) -> Optional[TurnClassification]:
         category = str(data.get("category", "")).strip().lower()

@@ -13,6 +13,7 @@ Endpoints:
   GET  /evaluation/student/{id}        - historial de un estudiante
   GET  /evaluation/rubric/active       - rubrica vigente
 """
+import logging
 from typing import Optional
 from uuid import UUID
 
@@ -21,8 +22,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db
-from app.core.auth import verify_supabase_token
+from app.api.v1.deps import get_db, resolve_authenticated_user
 from app.core.config import SUPABASE_JWT_SECRET
 from app.models.user_profile import UserProfile
 from app.repositories.evaluations_repository import (
@@ -30,10 +30,10 @@ from app.repositories.evaluations_repository import (
     RubricsRepository,
 )
 from app.repositories.sessions_repository import SessionRepository
-from app.repositories.users_repository import UsersRepository
-from app.services.evaluation_service import compute_overall_score, run_auto_evaluation
+from app.services.evaluation.service import compute_overall_score, run_auto_evaluation
 
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
+logger = logging.getLogger(__name__)
 
 _security = HTTPBearer(auto_error=False)
 
@@ -43,18 +43,11 @@ def _get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials],
 ) -> Optional[UserProfile]:
     """Si auth desactivada (modo dev), devuelve None. Si activa, devuelve UserProfile."""
-    if not SUPABASE_JWT_SECRET:
-        return None
-    if credentials is None:
-        return None
-    try:
-        payload = verify_supabase_token(credentials.credentials)
-        user_id_str = payload.get("sub")
-        if not user_id_str:
-            return None
-        return UsersRepository.get_by_id(db, UUID(user_id_str))
-    except Exception:
-        return None
+    return resolve_authenticated_user(
+        db=db,
+        credentials=credentials,
+        allow_missing_credentials=True,
+    )
 
 
 def _require_staff_or_dev(
@@ -70,6 +63,26 @@ def _require_staff_or_dev(
             detail="Solo teachers y admins pueden ejecutar esta operacion",
         )
     return user
+
+
+def _authorize_evaluation_read(
+    *,
+    db: Session,
+    credentials: HTTPAuthorizationCredentials | None,
+    evaluation,
+    session,
+) -> None:
+    """Valida el acceso de lectura antes de generar efectos secundarios."""
+    if not SUPABASE_JWT_SECRET:
+        return
+
+    user = _get_current_user(db, credentials)
+    owner_id = evaluation.student_id if evaluation is not None else getattr(session, "user_id", None)
+    if user.role not in ("teacher", "admin") and owner_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo el dueno de la sesion o staff puede ver esta evaluacion",
+        )
 
 
 # ----- Schemas ---------------------------------------------------------------
@@ -204,21 +217,27 @@ def get_evaluation(
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ):
     ev = EvaluationsRepository.get_by_session(db, session_id)
+    session = SessionRepository.get_by_id(db, session_id)
+
+    if ev is None and session is None:
+        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+
+    _authorize_evaluation_read(
+        db=db,
+        credentials=credentials,
+        evaluation=ev,
+        session=session,
+    )
+
     if not ev:
-        # Auto-crear con metricas si la sesion existe
+        # Auto-crear con metricas solo despues de validar permisos.
         ev = run_auto_evaluation(db, session_id)
         if not ev:
-            raise HTTPException(status_code=404, detail="Sesion no encontrada")
-
-    if SUPABASE_JWT_SECRET:
-        user = _get_current_user(db, credentials)
-        if user is None:
-            raise HTTPException(status_code=401, detail="Auth requerida")
-        if user.role not in ("teacher", "admin") and ev.student_id != user.id:
-            raise HTTPException(
-                status_code=403,
-                detail="Solo el dueno de la sesion o staff puede ver esta evaluacion",
+            logger.warning(
+                "[evaluation] No se pudo generar evaluacion automatica para session_id=%s",
+                session_id,
             )
+            raise HTTPException(status_code=404, detail="Sesion no encontrada")
 
     return _serialize_evaluation(db, ev)
 

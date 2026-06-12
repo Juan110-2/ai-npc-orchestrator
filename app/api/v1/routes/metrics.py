@@ -1,28 +1,26 @@
 """
-Endpoints de metricas tecnicas para seleccion de API de IA (Capitulo 3 del TG).
+Endpoints de métricas técnicas para selección y comparación de proveedores de IA.
 
-Permisos:
-    - admin: lectura total.
-    - teacher: 403 forbidden.
-    - student: 403 forbidden.
-    - sin auth (modo dev, SUPABASE_JWT_SECRET no configurado): lectura total.
+Acceso:
+  - `admin`: lectura total.
+  - `teacher` y `student`: sin acceso.
+  - sin auth (modo dev): lectura total si `SUPABASE_JWT_SECRET` no está configurado.
 """
+import logging
 from typing import Optional
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db
+from app.api.v1.deps import get_db, resolve_authenticated_user
 from app.core.config import SUPABASE_JWT_SECRET
 from app.models.ai_call_log import AICallLog
 from app.models.user_profile import UserProfile
-from app.repositories.ai_call_logs_repository import AICallLogsRepository
-from app.repositories.users_repository import UsersRepository
 
 router = APIRouter(prefix="/admin/metrics", tags=["admin-metrics"])
+logger = logging.getLogger(__name__)
 
 _security = HTTPBearer(auto_error=False)
 
@@ -31,7 +29,7 @@ def _require_admin(
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ) -> Optional[UserProfile]:
-    """Solo admin. Modo dev (sin SUPABASE_JWT_SECRET) pasa."""
+    """Permite acceso solo a usuarios con rol `admin`."""
     if not SUPABASE_JWT_SECRET:
         return None
 
@@ -42,56 +40,36 @@ def _require_admin(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    try:
-        from jose import jwt
-        token = credentials.credentials
-        unverified = jwt.get_unverified_claims(token)
-        user_id_str = unverified.get("sub")
-    except Exception:
+    user = resolve_authenticated_user(
+        db=db,
+        credentials=credentials,
+        allow_missing_credentials=False,
+    )
+    if user is None:
+        logger.warning("[metrics] Se esperaba usuario autenticado pero no se resolvió perfil")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalido",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Usuario autenticado sin perfil asociado",
         )
 
-    if not user_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token sin claim 'sub'",
-        )
-
-    try:
-        user = UsersRepository.get_by_id(db, UUID(user_id_str))
-    except Exception:
-        user = None
-
-    if not user or user.role != "admin":
+    if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden ver las metricas tecnicas",
+            detail="Solo administradores pueden ver las métricas técnicas",
         )
     return user
 
 
 @router.get(
     "/providers",
-    summary="Métricas por proveedor 🔒 admin",
+    summary="Ver métricas por proveedor",
     description=(
-        "Devuelve métricas agregadas de rendimiento por proveedor de IA, modelo y propósito "
-        "(leídas desde la vista `v_provider_metrics` en PostgreSQL).\n\n"
-        "**Campos retornados por fila:**\n\n"
-        "| Campo | Descripción |\n"
-        "|---|---|\n"
-        "| `provider` / `model` / `purpose` | Identificadores |\n"
-        "| `n_calls`, `n_ok`, `n_errors` | Conteos |\n"
-        "| `success_rate_pct` | Tasa de éxito (%) |\n"
-        "| `p50_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `mean_latency_ms` | Latencia |\n"
-        "| `mean_ttft_ms`, `p95_ttft_ms` | Tiempo al primer token |\n"
-        "| `total_cost_usd`, `mean_cost_usd_per_call` | Costo |\n"
-        "| `json_valid_rate_pct` | Tasa de respuestas JSON válidas |\n\n"
-        "El parámetro opcional `purpose` filtra por propósito: `orchestrator`, `classifier`, `evaluator`."
+        "Devuelve métricas agregadas de rendimiento por proveedor, modelo y propósito de llamada, "
+        "a partir de la vista `public.v_provider_metrics`.\n\n"
+        "Incluye conteos, tasas de éxito, latencias, uso de tokens, tiempo al primer token, "
+        "validez de JSON y costo. Puede filtrarse por `purpose`."
     ),
-    response_description="Lista de filas de métricas agrupadas por proveedor, modelo y propósito.",
+    response_description="Lista de métricas agrupadas por proveedor, modelo y propósito.",
     responses={
         401: {"description": "Token no enviado o inválido"},
         403: {"description": "Se requiere rol `admin`"},
@@ -101,7 +79,7 @@ def get_provider_metrics(
     db: Session = Depends(get_db),
     purpose: Optional[str] = Query(
         default=None,
-        description="Filtrar por propósito de llamada: `orchestrator`, `classifier`, `evaluator`.",
+        description="Filtrar por propósito: `orchestrator`, `classifier` o `evaluator`.",
     ),
     _: Optional[UserProfile] = Depends(_require_admin),
 ):
@@ -132,15 +110,14 @@ def get_provider_metrics(
 
 @router.get(
     "/calls",
-    summary="Últimas llamadas a IA 🔒 admin",
+    summary="Listar llamadas recientes a IA",
     description=(
-        "Devuelve el log de las llamadas más recientes a los proveedores de IA, "
-        "con detalles de tokens, latencia, costo y estado.\n\n"
-        "Filtros disponibles:\n"
-        "- `limit`: número de registros a devolver (1–1000, default 100).\n"
-        "- `provider`: filtra por proveedor específico (p. ej. `openai`, `gemini`, `deepseek`)."
+        "Devuelve el log más reciente de llamadas a proveedores de IA, incluyendo "
+        "estado, modelo, propósito, tokens, latencia, costo y errores.\n\n"
+        "Soporta filtros por proveedor, propósito y `session_id`, además de paginación "
+        "basada en `limit` y `offset`."
     ),
-    response_description="Lista de registros de llamadas ordenados por fecha descendente.",
+    response_description="Lista paginada de llamadas recientes a IA.",
     responses={
         401: {"description": "Token no enviado o inválido"},
         403: {"description": "Se requiere rol `admin`"},
@@ -148,14 +125,18 @@ def get_provider_metrics(
 )
 def list_recent_calls(
     db: Session = Depends(get_db),
-    limit: int = Query(default=15, ge=1, le=100, description="Registros por página (1–100)."),
-    offset: int = Query(default=0, ge=0, description="Desplazamiento para paginación."),
+    limit: int = Query(default=15, ge=1, le=100, description="Cantidad máxima de registros a devolver."),
+    offset: int = Query(default=0, ge=0, description="Desplazamiento inicial para la paginación."),
     provider: Optional[str] = Query(default=None, description="Filtrar por proveedor."),
-    purpose: Optional[str] = Query(default=None, description="Filtrar por propósito."),
-    session_id: Optional[str] = Query(default=None, description="Filtrar por session ID (prefijo o UUID completo)."),
+    purpose: Optional[str] = Query(default=None, description="Filtrar por propósito de llamada."),
+    session_id: Optional[str] = Query(
+        default=None,
+        description="Filtrar por `session_id` completo o por prefijo.",
+    ),
     _: Optional[UserProfile] = Depends(_require_admin),
 ):
-    from sqlalchemy import cast, Text
+    from sqlalchemy import Text, cast
+
     q = db.query(AICallLog)
     if provider:
         q = q.filter(AICallLog.provider == provider)
@@ -169,14 +150,21 @@ def list_recent_calls(
         {
             "id": str(r.id),
             "session_id": str(r.session_id) if r.session_id else None,
-            "provider": r.provider, "model": r.model,
-            "purpose": r.purpose, "call_mode": r.call_mode,
-            "status": r.status, "category": r.category,
-            "tokens_input": r.tokens_input, "tokens_output": r.tokens_output,
-            "latency_ms": r.latency_ms, "ttft_ms": r.ttft_ms,
+            "provider": r.provider,
+            "model": r.model,
+            "purpose": r.purpose,
+            "call_mode": r.call_mode,
+            "status": r.status,
+            "category": r.category,
+            "tokens_input": r.tokens_input,
+            "tokens_output": r.tokens_output,
+            "latency_ms": r.latency_ms,
+            "ttft_ms": r.ttft_ms,
             "json_valid": r.json_valid,
-            "response_chars": r.response_chars, "prompt_chars": r.prompt_chars,
-            "cost_usd": r.cost_usd, "error_detail": r.error_detail,
+            "response_chars": r.response_chars,
+            "prompt_chars": r.prompt_chars,
+            "cost_usd": r.cost_usd,
+            "error_detail": r.error_detail,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows
@@ -186,18 +174,14 @@ def list_recent_calls(
 
 @router.get(
     "/summary",
-    summary="Resumen global de métricas 🔒 admin",
+    summary="Obtener resumen global de métricas",
     description=(
-        "Devuelve un resumen consolidado de todas las llamadas a IA, estructurado en tres niveles:\n\n"
-        "- **`totals`**: totales globales (llamadas, tokens, errores, costo, proveedores únicos).\n"
-        "- **`by_provider`**: desglose por proveedor y modelo (llamadas, tasa de éxito, "
-        "latencia media, costo).\n"
-        "- **`by_purpose`**: desglose por propósito de llamada (`orchestrator`, `classifier`, "
-        "`evaluator`), con latencia media y tasa de JSON válido."
+        "Devuelve un resumen consolidado de las llamadas a IA en tres niveles:\n\n"
+        "- `totals`: conteos globales, tokens, costo y cantidad de proveedores/sesiones.\n"
+        "- `by_provider`: desglose por proveedor y modelo.\n"
+        "- `by_purpose`: desglose por propósito (`orchestrator`, `classifier`, `evaluator`)."
     ),
-    response_description=(
-        "Objeto con `totals` (dict), `by_provider` (lista) y `by_purpose` (lista)."
-    ),
+    response_description="Objeto con resumen global, por proveedor y por propósito.",
     responses={
         401: {"description": "Token no enviado o inválido"},
         403: {"description": "Se requiere rol `admin`"},

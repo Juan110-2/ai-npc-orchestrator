@@ -9,7 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.services.turn_classifier import TurnClassifier
+from app.services.conversation.classifier import TurnClassifier
 from app.repositories.conversation_repository import ConversationRepository
 
 # Patrones normalizados (sin tildes, minúsculas) de insultos directos y lenguaje agresivo.

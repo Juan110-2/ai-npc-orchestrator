@@ -21,6 +21,10 @@ _DEFAULT_RESULT: dict = {
 }
 
 
+def _default_result() -> dict:
+    return dict(_DEFAULT_RESULT)
+
+
 def _extract_json(text: str) -> dict | None:
     if not text:
         return None
@@ -72,7 +76,7 @@ def _build_prompt(user_input: str) -> str:
 
 
 def _sanitize(parsed: dict) -> dict:
-    result = dict(_DEFAULT_RESULT)
+    result = _default_result()
     for key in ("empathy_score", "assertiveness_score", "pressure_score"):
         try:
             result[key] = max(0.0, min(1.0, float(parsed.get(key, 0.0))))
@@ -83,6 +87,19 @@ def _sanitize(parsed: dict) -> dict:
         result["overall_impact"] = max(-1, min(1, impact))
     except Exception:
         result["overall_impact"] = 0
+    return result
+
+
+def _parse_evaluation_response(content: str) -> tuple[dict, bool]:
+    parsed = _extract_json(content)
+    if not parsed:
+        return _default_result(), False
+    return _sanitize(parsed), True
+
+
+def _evaluate_with_client(ai, prompt: str) -> dict:
+    ai_response = ai.generate_response(prompt, "")
+    result, _ = _parse_evaluation_response(ai_response.content)
     return result
 
 
@@ -104,23 +121,19 @@ def evaluate_intervention(
             ctx.record_prompt_chars(len(prompt))
             try:
                 ai_response = ctx.client.generate_response(prompt, "")
-                parsed = _extract_json(ai_response.content)
-                if parsed is None:
+                result, is_valid_json = _parse_evaluation_response(ai_response.content)
+                if not is_valid_json:
                     ctx.record_parse_error(ai_response.content)
-                    return dict(_DEFAULT_RESULT)
+                    return _default_result()
                 ctx.record_response(ai_response, json_valid=True)
-                return _sanitize(parsed)
+                return result
             except Exception as exc:
                 ctx.record_error(exc)
-                return dict(_DEFAULT_RESULT)
+                return _default_result()
 
     # Fallback sin logging (compatibilidad / tests sin BD)
     try:
         ai = get_ai_client()
-        ai_response = ai.generate_response(prompt, "")
-        parsed = _extract_json(ai_response.content)
+        return _evaluate_with_client(ai, prompt)
     except Exception:
-        parsed = None
-    if not parsed:
-        return dict(_DEFAULT_RESULT)
-    return _sanitize(parsed)
+        return _default_result()

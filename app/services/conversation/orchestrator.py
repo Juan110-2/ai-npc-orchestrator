@@ -72,6 +72,8 @@ class ConversationOrchestrator:
         ),
     }
 
+    _NO_CONTEXT_MESSAGES = None
+
     # ------------------------------------------------------------------ #
     # HELPERS PRIVADOS — PROMPT BUILDING                                  #
     # ------------------------------------------------------------------ #
@@ -316,6 +318,40 @@ class ConversationOrchestrator:
         _, recent = ConversationOrchestrator._split_history(conversation_history)
         return recent
 
+    @staticmethod
+    def _normalize_context_messages(recent: list[dict[str, str]]) -> list[dict[str, str]] | None:
+        return recent or ConversationOrchestrator._NO_CONTEXT_MESSAGES
+
+    @staticmethod
+    def _generate_sync_response(
+        system_prompt: str,
+        user_input: str,
+        recent: list[dict[str, str]],
+        *,
+        db: Optional[Session] = None,
+        session_id: Optional[UUID] = None,
+    ) -> AIResponse:
+        context_messages = ConversationOrchestrator._normalize_context_messages(recent)
+        if db is not None:
+            with log_ai_call(
+                db, purpose="orchestrator", session_id=session_id, call_mode="sync"
+            ) as ctx:
+                ctx.record_prompt_chars(len(system_prompt) + len(user_input))
+                ai_response = ctx.client.generate_response(
+                    system_prompt,
+                    user_input,
+                    context_messages=context_messages,
+                )
+                ctx.record_response(ai_response, json_valid=None)
+                return ai_response
+
+        ai = get_ai_client()
+        return ai.generate_response(
+            system_prompt,
+            user_input,
+            context_messages=context_messages,
+        )
+
     # ------------------------------------------------------------------ #
     # METODOS PUBLICOS — GENERACION DE RESPUESTAS                         #
     # ------------------------------------------------------------------ #
@@ -363,20 +399,12 @@ class ConversationOrchestrator:
             memory_block=memory_block,
         )
 
-        if db is not None:
-            with log_ai_call(
-                db, purpose="orchestrator", session_id=session_id, call_mode="sync"
-            ) as ctx:
-                ctx.record_prompt_chars(len(system_prompt) + len(user_input))
-                ai_response = ctx.client.generate_response(
-                    system_prompt, user_input, context_messages=recent or None
-                )
-                ctx.record_response(ai_response, json_valid=None)
-                return ai_response
-
-        ai = get_ai_client()
-        return ai.generate_response(
-            system_prompt, user_input, context_messages=recent or None
+        return ConversationOrchestrator._generate_sync_response(
+            system_prompt,
+            user_input,
+            recent,
+            db=db,
+            session_id=session_id,
         )
 
     @staticmethod
@@ -505,8 +533,6 @@ class ConversationOrchestrator:
         Usa build_closing_phase_prompt para construir el prompt y luego llama a la IA.
         Si el LLM falla, hace fallback a un texto deterministico breve.
         """
-        from app.services.ai.base import AIResponse
-
         older, recent = ConversationOrchestrator._split_history(conversation_history)
         memory_block = ConversationOrchestrator._build_semantic_summary(older)
         system_prompt = ConversationOrchestrator.build_closing_phase_prompt(
@@ -519,21 +545,13 @@ class ConversationOrchestrator:
         )
 
         try:
-            if db is not None:
-                with log_ai_call(
-                    db, purpose="orchestrator", session_id=session_id, call_mode="sync"
-                ) as ctx:
-                    ctx.record_prompt_chars(len(system_prompt) + len(user_input))
-                    ai_response = ctx.client.generate_response(
-                        system_prompt, user_input, context_messages=recent or None
-                    )
-                    ctx.record_response(ai_response, json_valid=None)
-                    return ai_response
-            else:
-                ai = get_ai_client()
-                return ai.generate_response(
-                    system_prompt, user_input, context_messages=recent or None
-                )
+            return ConversationOrchestrator._generate_sync_response(
+                system_prompt,
+                user_input,
+                recent,
+                db=db,
+                session_id=session_id,
+            )
         except Exception:
             fallback = (
                 "Me empiezo a sentir algo mejor..."
@@ -569,9 +587,6 @@ class ConversationOrchestrator:
           - 'crisis': severidad >= 5, paciente desbordado
           - 'inappropriate': conducta inapropiada del estudiante
         """
-        from app.services.ai.base import AIResponse
-        from app.services.ai.metrics_logger import log_ai_call
-
         if closing_kind == "success":
             closing_instruction = (
                 "La conversacion ha logrado calmarte completamente. Tu severidad esta en 0. "
@@ -622,21 +637,13 @@ class ConversationOrchestrator:
         last_turn = "Despidete ahora cumpliendo todas las reglas anteriores."
 
         try:
-            if db is not None:
-                with log_ai_call(
-                    db, purpose="orchestrator", session_id=session_id, call_mode="sync"
-                ) as ctx:
-                    ctx.record_prompt_chars(len(system_prompt) + len(last_turn))
-                    ai_response = ctx.client.generate_response(
-                        system_prompt, last_turn, context_messages=recent or None
-                    )
-                    ctx.record_response(ai_response, json_valid=None)
-                    return ai_response
-            else:
-                ai = get_ai_client()
-                return ai.generate_response(
-                    system_prompt, last_turn, context_messages=recent or None
-                )
+            return ConversationOrchestrator._generate_sync_response(
+                system_prompt,
+                last_turn,
+                recent,
+                db=db,
+                session_id=session_id,
+            )
         except Exception:
             return AIResponse(
                 content=ConversationOrchestrator.closing_message(closing_kind),

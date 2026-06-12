@@ -1,8 +1,13 @@
 """
 Rutas de administración de usuarios.
-Solo accesibles para usuarios con role = 'admin'.
+
+Acceso:
+  - `admin`: acceso completo a todas las rutas.
+  - `teacher`: acceso a la lista de estudiantes.
+  - `student`: sin acceso a este módulo.
 """
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -15,71 +20,7 @@ from app.schemas.users import UserProfileResponse, UserProfileUpdate
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _require_teacher_or_admin(
-    db: Session = Depends(get_db),
-    payload: dict | None = Depends(verify_supabase_jwt),
-) -> UserProfile:
-    if payload is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Se requiere autenticación")
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin sub")
-
-    user = UsersRepository.get_by_id(db, UUID(user_id))
-    if not user or user.role not in ("teacher", "admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Se requiere rol teacher o admin")
-    return user
-
-
-def _require_admin(
-    db: Session = Depends(get_db),
-    payload: dict | None = Depends(verify_supabase_jwt),
-) -> UserProfile:
-    """
-    Dependency que garantiza que el caller es admin.
-    - Si auth está desactivado (dev), lanza 403 igualmente para proteger la ruta.
-    - Si está activo, valida rol en user_profiles.
-    """
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ruta de administración — se requiere autenticación y rol admin",
-        )
-
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token sin sub")
-
-    user = UsersRepository.get_by_id(db, UUID(user_id))
-    if not user or user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acceso denegado — se requiere rol admin",
-        )
-    return user
-
-
-@router.get(
-    "/me",
-    response_model=UserProfileResponse,
-    summary="Obtener perfil propio 🔒",
-    description=(
-        "Devuelve el perfil del usuario autenticado, incluyendo su rol en la plataforma. "
-        "El frontend lo usa para conocer el rol real (`student`, `teacher`, `admin`) "
-        "sin depender del campo `user_metadata` de Supabase Auth.\n\n"
-        "Requiere un JWT válido de Supabase (`Authorization: Bearer <token>`)."
-    ),
-    response_description="Perfil del usuario autenticado con su rol.",
-    responses={
-        401: {"description": "No autenticado o token sin campo `sub`"},
-        404: {"description": "Perfil de usuario no encontrado en la base de datos"},
-    },
-)
-def get_my_profile(
-    db: Session = Depends(get_db),
-    payload: dict | None = Depends(verify_supabase_jwt),
-):
+def _get_authenticated_profile(db: Session, payload: dict | None) -> UserProfile:
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No autenticado")
 
@@ -94,15 +35,69 @@ def get_my_profile(
     return user
 
 
+def _require_teacher_or_admin(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(verify_supabase_jwt),
+) -> UserProfile:
+    user = _get_authenticated_profile(db, payload)
+    if user.role not in ("teacher", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Se requiere rol teacher o admin",
+        )
+    return user
+
+
+def _require_admin(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(verify_supabase_jwt),
+) -> UserProfile:
+    """
+    Garantiza que el caller tenga rol `admin`.
+
+    Si el JWT es válido pero el perfil local no es admin, responde 403.
+    """
+    user = _get_authenticated_profile(db, payload)
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado: se requiere rol admin",
+        )
+    return user
+
+
+@router.get(
+    "/me",
+    response_model=UserProfileResponse,
+    summary="Obtener perfil autenticado",
+    description=(
+        "Devuelve el perfil local del usuario autenticado, incluyendo su rol real en la plataforma. "
+        "Este endpoint permite al frontend resolver permisos sin depender del `user_metadata` "
+        "de Supabase Auth.\n\n"
+        "Requiere un JWT válido en `Authorization: Bearer <token>`."
+    ),
+    response_description="Perfil autenticado con datos básicos y rol.",
+    responses={
+        401: {"description": "No autenticado o token sin `sub`"},
+        404: {"description": "Perfil local no encontrado"},
+    },
+)
+def get_my_profile(
+    db: Session = Depends(get_db),
+    payload: dict | None = Depends(verify_supabase_jwt),
+):
+    return _get_authenticated_profile(db, payload)
+
+
 @router.get(
     "/users",
     response_model=list[UserProfileResponse],
-    summary="Listar todos los usuarios 🔒 admin",
+    summary="Listar usuarios",
     description=(
         "Devuelve la lista completa de usuarios registrados en la plataforma. "
-        "Solo accesible para usuarios con rol `admin`."
+        "Solo está disponible para cuentas con rol `admin`."
     ),
-    response_description="Lista de usuarios con id, email, nombre y rol.",
+    response_description="Lista de perfiles de usuario.",
     responses={
         401: {"description": "No autenticado"},
         403: {"description": "Se requiere rol `admin`"},
@@ -118,14 +113,14 @@ def list_users(
 @router.patch(
     "/users/{user_id}",
     response_model=UserProfileResponse,
-    summary="Actualizar usuario 🔒 admin",
+    summary="Actualizar usuario",
     description=(
-        "Actualiza el rol o nombre de un usuario. Solo accesible para `admin`.\n\n"
-        "**Restricción**: un administrador no puede cambiar su propio rol a uno inferior."
+        "Actualiza parcialmente el rol o el nombre de un usuario.\n\n"
+        "Restricción: un administrador no puede degradar su propio rol desde este endpoint."
     ),
-    response_description="Usuario actualizado.",
+    response_description="Perfil de usuario actualizado.",
     responses={
-        400: {"description": "El admin intenta quitarse su propio rol"},
+        400: {"description": "Intento de auto-degradación de un admin"},
         401: {"description": "No autenticado"},
         403: {"description": "Se requiere rol `admin`"},
         404: {"description": "Usuario no encontrado"},
@@ -158,13 +153,13 @@ def update_user(
 @router.get(
     "/students",
     response_model=list[UserProfileResponse],
-    summary="Listar estudiantes 🔒 teacher / admin",
+    summary="Listar estudiantes",
     description=(
         "Devuelve todos los usuarios con rol `student`. "
-        "Accesible para `teacher` y `admin`. "
-        "Útil para que un docente seleccione a quién asignar una sesión."
+        "Puede ser consultado por `teacher` y `admin`.\n\n"
+        "Es útil para asignación de sesiones y revisión docente."
     ),
-    response_description="Lista de usuarios con rol `student`.",
+    response_description="Lista de perfiles con rol `student`.",
     responses={
         401: {"description": "No autenticado"},
         403: {"description": "Se requiere rol `teacher` o `admin`"},

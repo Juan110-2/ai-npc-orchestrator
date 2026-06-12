@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
-from uuid import UUID
 from datetime import datetime
+from typing import Any, Dict, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 _TRAITS_EXAMPLE = {
     "age": 34,
@@ -44,8 +45,9 @@ class ProfileCreate(BaseModel):
     behavior: Dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Comportamiento conversacional: `behavior_min`/`behavior_max` definen el rango de "
-            "severidad emocional permitido (0–5). `triggers` suben severidad; `regulators` la bajan."
+            "Comportamiento conversacional: `behavior_min` y `behavior_max` definen el rango de "
+            "severidad emocional permitido (0 a 5). `triggers` suben severidad; "
+            "`regulators` la bajan."
         ),
         examples=[_BEHAVIOR_EXAMPLE],
     )

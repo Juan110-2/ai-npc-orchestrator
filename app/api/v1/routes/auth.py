@@ -1,13 +1,13 @@
 """
-Endpoints de autenticación — proxy hacia Supabase Auth.
+Endpoints de autenticación: proxy hacia Supabase Auth.
 
 Permite obtener un JWT de Supabase directamente desde la API,
 sin pasar por el frontend. Útil para pruebas en Swagger y clientes externos.
 
-Métodos soportados por Supabase (este endpoint cubre email+password):
-  - Email + contraseña  → POST /auth/login
-  - Código OTP / magic link  → se inicia desde el cliente Supabase / frontend
-  - OAuth Google  → se inicia desde el cliente Supabase / frontend
+Métodos soportados por Supabase (este endpoint cubre email y contraseña):
+  - Email + contraseña -> POST /auth/login
+  - Código OTP / magic link -> se inicia desde el cliente Supabase o el frontend
+  - OAuth Google -> se inicia desde el cliente Supabase o el frontend
 """
 import httpx
 from fastapi import APIRouter, HTTPException, status
@@ -60,9 +60,23 @@ class ForgotPasswordInput(BaseModel):
 
 class LoginResponse(BaseModel):
     access_token: str = Field(..., description="JWT de Supabase. Úsalo en `Authorization: Bearer <token>`.")
-    token_type: str = Field("bearer", description="Tipo de token — siempre `bearer`.")
+    token_type: str = Field("bearer", description="Tipo de token: siempre `bearer`.")
     expires_in: int = Field(..., description="Segundos hasta que expira el token (normalmente 3600).")
     refresh_token: str = Field(..., description="Token para renovar la sesión sin volver a autenticarse.")
+
+
+class SignupResponse(BaseModel):
+    message: str = Field(..., description="Mensaje resumido del resultado del registro.")
+    user_id: str | None = Field(None, description="UUID del usuario creado, si Supabase lo devuelve.")
+    email: str | None = Field(None, description="Correo asociado a la cuenta creada.")
+    access_token: str | None = Field(
+        None,
+        description="JWT inicial si la confirmación por correo está desactivada; `null` en caso contrario.",
+    )
+    confirmation_required: bool = Field(
+        ...,
+        description="Indica si el usuario debe confirmar su correo antes de iniciar sesión.",
+    )
 
 
 @router.post(
@@ -72,16 +86,13 @@ class LoginResponse(BaseModel):
     description=(
         "Autentica al usuario contra Supabase usando email y contraseña, "
         "y devuelve un JWT listo para usar en los endpoints protegidos.\n\n"
-        "**Cómo usarlo en Swagger:**\n"
+        "Cómo usarlo en Swagger:\n"
         "1. Ejecuta este endpoint con tus credenciales.\n"
         "2. Copia el valor de `access_token` de la respuesta.\n"
-        "3. Haz clic en **Authorize** (arriba a la derecha) y pega el token.\n"
-        "4. Todos los endpoints protegidos quedan autorizados para esta sesión.\n\n"
-        "**Otros métodos de autenticación soportados por la plataforma:**\n"
-        "- **Google OAuth**: se inicia desde el frontend — redirige a Google y Supabase emite el JWT.\n"
-        "- **Magic link / OTP**: se solicita desde el frontend — Supabase envía un código al correo.\n\n"
-        "**Nota**: requiere que `SUPABASE_URL` y `SUPABASE_ANON_KEY` estén configurados. "
-        "En modo desarrollo local sin Supabase, este endpoint retorna `503`."
+        "3. Haz clic en **Authorize** y pega el token.\n"
+        "4. Los endpoints protegidos quedarán autorizados para esa sesión.\n\n"
+        "Requiere que `SUPABASE_URL` y `SUPABASE_ANON_KEY` estén configurados. "
+        "En modo desarrollo local sin Supabase, este endpoint responde `503`."
     ),
     response_description="JWT de Supabase con tipo, expiración y refresh token.",
     responses={
@@ -135,11 +146,10 @@ def login(body: LoginInput):
     description=(
         "Envía un correo de recuperación de contraseña al email indicado. "
         "Si el correo no existe en el sistema, la respuesta es igualmente `204` "
-        "(por seguridad, no se revela si el email está registrado).\n\n"
-        "El usuario recibirá un enlace para establecer una nueva contraseña. "
-        "El enlace redirige al frontend configurado en Supabase."
+        "para no revelar si la cuenta está registrada.\n\n"
+        "El enlace de recuperación redirige al frontend configurado en Supabase."
     ),
-    response_description="Sin contenido — el correo fue enviado (o el email no existe).",
+    response_description="Sin contenido: el correo fue enviado o el email no existe.",
     responses={
         503: {"description": "Supabase no configurado en este entorno"},
     },
@@ -171,24 +181,21 @@ def forgot_password(body: ForgotPasswordInput):
 
 @router.post(
     "/signup",
+    response_model=SignupResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Registrar nueva cuenta con email y contraseña",
     description=(
         "Crea una nueva cuenta de usuario en la plataforma usando email y contraseña.\n\n"
-        "**Flujo completo de registro:**\n"
+        "Flujo completo:\n"
         "1. Llamar este endpoint con email, contraseña y nombre completo.\n"
         "2. Supabase crea la cuenta y envía un correo de confirmación.\n"
         "3. El usuario confirma su correo haciendo clic en el enlace recibido.\n"
-        "4. Usar `POST /auth/login` con las mismas credenciales para obtener el JWT.\n\n"
-        "**Rol asignado:** todo usuario nuevo recibe el rol `student` por defecto. "
-        "Un `admin` puede cambiarlo después mediante `PATCH /admin/users/{id}`.\n\n"
-        "**Nota:** si la confirmación de email está desactivada en Supabase, "
-        "el JWT se devuelve directamente en la respuesta de este endpoint."
+        "4. Luego puede usar `POST /auth/login` para obtener el JWT.\n\n"
+        "Todo usuario nuevo recibe el rol `student` por defecto. "
+        "Si la confirmación por correo está desactivada en Supabase, el JWT puede devolverse "
+        "directamente en la respuesta."
     ),
-    response_description=(
-        "Cuenta creada. Si la confirmación de email está desactivada, incluye el JWT. "
-        "Si está activada, `access_token` es `null` y el usuario debe confirmar su correo."
-    ),
+    response_description="Resultado del registro, con indicación de si la confirmación por correo es requerida.",
     responses={
         400: {"description": "Email ya registrado u otros errores de validación de Supabase"},
         503: {"description": "Supabase no configurado en este entorno"},
@@ -230,7 +237,7 @@ def signup(body: SignupInput):
 
     data = resp.json()
     return {
-        "message": "Cuenta creada. Revisá tu correo para confirmar la cuenta antes de iniciar sesión.",
+        "message": "Cuenta creada. Revisa tu correo para confirmar la cuenta antes de iniciar sesión.",
         "user_id": data.get("id"),
         "email": data.get("email"),
         "access_token": data.get("access_token"),

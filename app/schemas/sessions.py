@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from uuid import UUID
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 _SESSION_ID_EX = "c3d4e5f6-a7b8-9012-cdef-123456789012"
 _PROFILE_ID_EX = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
@@ -86,7 +87,7 @@ class SessionResponse(BaseModel):
     current_severity: float = Field(
         ...,
         description=(
-            "Severidad emocional actual del NPC (dentro del rango `behavior_min`–`behavior_max`). "
+            "Severidad emocional actual del NPC dentro del rango `behavior_min` a `behavior_max`. "
             "Se actualiza automáticamente en cada turno de conversación."
         ),
         examples=[2.7],
@@ -103,7 +104,7 @@ class SessionResponse(BaseModel):
     )
     last_ai_model: Optional[str] = Field(
         None,
-        description="Último modelo de IA usado en esta sesión (desde ai_call_logs).",
+        description="Último modelo de IA usado en esta sesión, obtenido desde `ai_call_logs`.",
     )
 
     model_config = {
@@ -124,6 +125,7 @@ class SessionResponse(BaseModel):
                 "base_severity": 3.0,
                 "started_at": "2025-05-10T09:00:00Z",
                 "ended_at": None,
+                "last_ai_model": "gpt-4o-mini",
             }
         },
     }

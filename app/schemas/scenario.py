@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field
 
 _CONTEXT_EXAMPLE = (
     "El personaje acude por primera vez a una conversación de apoyo. Refiere estrés intenso "
@@ -14,7 +15,7 @@ class ScenarioCreate(BaseModel):
     name: str = Field(
         ...,
         description="Nombre identificador del escenario de simulación.",
-        examples=["Primera conversación — estrés laboral"],
+        examples=["Primera conversación: estrés laboral"],
     )
     context: str = Field(
         ...,
@@ -31,7 +32,7 @@ class ScenarioCreate(BaseModel):
         le=5,
         description=(
             "Severidad emocional inicial del personaje simulado al comenzar la sesión "
-            "(1 = leve, 5 = muy alto). "
+            "(1 = leve, 5 = muy alta). "
             "El motor de conversación parte de este valor y lo ajusta dinámicamente."
         ),
         examples=[3],
@@ -56,7 +57,7 @@ class ScenarioCreate(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "name": "Primera conversación — estrés laboral",
+                "name": "Primera conversación: estrés laboral",
                 "context": _CONTEXT_EXAMPLE,
                 "severity": 3,
                 "risk_flags": ["ideación_pasiva"],
@@ -70,7 +71,7 @@ class ScenarioUpdate(BaseModel):
     name: Optional[str] = Field(
         None,
         description="Nuevo nombre del escenario.",
-        examples=["Primera conversación — estrés laboral (rev. 2)"],
+        examples=["Primera conversación: estrés laboral (rev. 2)"],
     )
     context: Optional[str] = Field(
         None,
@@ -80,7 +81,7 @@ class ScenarioUpdate(BaseModel):
         default=None,
         ge=1,
         le=5,
-        description="Nueva severidad inicial (1–5).",
+        description="Nueva severidad inicial (1 a 5).",
         examples=[2],
     )
     risk_flags: Optional[List[str]] = Field(
@@ -111,7 +112,7 @@ class ScenarioResponse(ScenarioCreate):
         "json_schema_extra": {
             "example": {
                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-                "name": "Primera conversación — estrés laboral",
+                "name": "Primera conversación: estrés laboral",
                 "context": _CONTEXT_EXAMPLE,
                 "severity": 3,
                 "risk_flags": ["ideación_pasiva"],

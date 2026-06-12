@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
 from app.api.v1.deps import get_db
-from app.schemas.scenario import ScenarioCreate, ScenarioResponse, ScenarioUpdate
 from app.repositories.scenario_repository import ScenarioRepository
+from app.schemas.scenario import ScenarioCreate, ScenarioResponse, ScenarioUpdate
 
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
@@ -18,11 +19,11 @@ _404 = {404: {"description": "Escenario no encontrado"}}
     summary="Crear escenario",
     description=(
         "Crea un nuevo escenario de simulación. "
-        "El escenario define la situación narrativa que el personaje simulado (NPC) conoce, "
-        "la severidad emocional inicial (1–5), los indicadores de riesgo y las restricciones "
+        "El escenario define la situación narrativa que el personaje simulado conoce, "
+        "la severidad emocional inicial, los indicadores de riesgo y las restricciones "
         "de comportamiento."
     ),
-    response_description="Escenario creado con su UUID asignado y timestamp.",
+    response_description="Escenario creado con UUID y timestamp.",
 )
 def create_scenario(
     payload: ScenarioCreate,
@@ -68,8 +69,8 @@ def get_scenario(
     summary="Actualizar escenario",
     description=(
         "Actualiza parcialmente un escenario de simulación. "
-        "Solo se modifican los campos incluidos en el body. "
-        "**Nota**: `risk_flags` y `constraints` se reemplazan completamente si se envían."
+        "Solo se modifican los campos incluidos en el body.\n\n"
+        "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían."
     ),
     response_description="Escenario actualizado.",
     responses=_404,

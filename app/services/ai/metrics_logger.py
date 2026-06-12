@@ -14,7 +14,7 @@ truena (status='unknown_error' + error_detail).
 """
 from __future__ import annotations
 
-import sys
+import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -33,6 +33,8 @@ ALLOWED_STATUS = {
     "ok", "timeout", "parse_error", "safety_block",
     "rate_limit", "auth_error", "network_error", "unknown_error",
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _classify_exception(exc: BaseException) -> str:
@@ -161,7 +163,7 @@ def log_ai_call(
 
 
 def _persist(ctx: CallContext) -> None:
-    """Calcula costo y guarda el log. Si falla, lo loguea a stderr."""
+    """Calcula costo y guarda el log. Si falla, lo registra sin romper el flujo."""
     if ctx._latency_ms is None:
         ctx._latency_ms = round((time.perf_counter() - ctx._start) * 1000, 2)
 
@@ -195,11 +197,10 @@ def _persist(ctx: CallContext) -> None:
             cost_usd=cost_usd,
         )
     except Exception as log_exc:
-        # Visible en stderr, no oculto silencioso
-        print(
-            f"[metrics_logger] ai_call_logs INSERT failed: "
-            f"{type(log_exc).__name__}: {log_exc}",
-            file=sys.stderr,
+        logger.exception(
+            "[metrics_logger] ai_call_logs INSERT failed: %s: %s",
+            type(log_exc).__name__,
+            log_exc,
         )
         try:
             ctx.db.rollback()

@@ -1,26 +1,100 @@
+import logging
 import math
+from datetime import datetime, timezone
 from typing import Optional
+from uuid import UUID
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-from uuid import UUID
-from datetime import datetime, timezone
-
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, optional_jwt
 from app.models.ai_call_log import AICallLog
-from app.schemas.sessions import SessionCreate, SessionResponse, PaginatedSessionsResponse
-from app.repositories.sessions_repository import SessionRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.scenario_repository import ScenarioRepository
+from app.repositories.sessions_repository import SessionRepository
 from app.repositories.users_repository import UsersRepository
-from app.services.evaluation_service import run_auto_evaluation
-from app.services.session_time_service import finalize_session_time
+from app.schemas.sessions import PaginatedSessionsResponse, SessionCreate, SessionResponse
+from app.services.evaluation.service import run_auto_evaluation
+from app.services.sessions.time_service import finalize_session_time
+
+logger = logging.getLogger(__name__)
+
+
+def _commit_session_update(db: Session, session_id: UUID, *, source: str) -> None:
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[%s] Falló commit para session_id=%s", source, session_id)
+        raise
+
+
+def _run_post_close_hooks(db: Session, session) -> None:
+    """Ejecuta pasos posteriores al cierre sin ocultar trazabilidad operativa."""
+    try:
+        finalize_session_time(db, session)
+        _commit_session_update(db, session.id, source="sessions.end.finalize_time")
+    except Exception:
+        logger.exception(
+            "[sessions.end] Falló finalize_session_time para session_id=%s",
+            session.id,
+        )
+
+    try:
+        run_auto_evaluation(db, session.id)
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "[sessions.end] Falló run_auto_evaluation para session_id=%s",
+            session.id,
+        )
+
+
+def _resolve_session_actor(db: Session, payload: dict | None):
+    if payload is None:
+        return None, None
+    user_id = UUID(payload["sub"])
+    user = UsersRepository.get_by_id(db, user_id)
+    return user_id, user
+
+
+def _list_all_sessions(db: Session, limit: int, offset: int, status_filter: str | None) -> tuple[int, list]:
+    return (
+        SessionRepository.count_recent(db, status_filter),
+        SessionRepository.list_recent(db, limit, offset, status_filter),
+    )
+
+
+def _list_user_sessions(
+    db: Session,
+    user_id: UUID,
+    limit: int,
+    offset: int,
+    status_filter: str | None,
+) -> tuple[int, list]:
+    return (
+        SessionRepository.count_by_user(db, user_id, status_filter),
+        SessionRepository.list_by_user(db, user_id, limit, offset, status_filter),
+    )
+
+
+def _list_assigned_sessions(
+    db: Session,
+    user_id: UUID,
+    limit: int,
+    offset: int,
+    status_filter: str | None,
+) -> tuple[int, list]:
+    return (
+        SessionRepository.count_assigned_to_others(db, user_id, user_id, status_filter),
+        SessionRepository.list_assigned_to_others(db, user_id, user_id, limit, offset, status_filter),
+    )
 
 
 def _last_model_map(db: Session, session_ids: list) -> dict[str, str]:
-    """Batch query: returns {session_id_str: model} for the most recent ok call."""
+    """Batch query: retorna `{session_id: model}` para la llamada `ok` más reciente."""
     if not session_ids:
         return {}
     latest = (
@@ -43,98 +117,135 @@ def _last_model_map(db: Session, session_ids: list) -> dict[str, str]:
     )
     return {str(r.session_id): r.model for r in rows}
 
+
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 _404 = {404: {"description": "Sesión no encontrada"}}
-_400 = {400: {"description": "Solicitud inválida (p. ej. sesión ya cerrada)"}}
+_400 = {400: {"description": "Solicitud inválida, por ejemplo una sesión ya cerrada"}}
 
 
 def _paginated_sessions(
     db: Session,
     payload: dict | None,
     view: str | None,
-    status: str | None,
+    status_filter: str | None,
     limit: int,
     offset: int,
 ) -> tuple[int, list]:
-    """Returns (total, items) respecting role and view filter."""
+    """Retorna `(total, items)` respetando rol y filtro de vista."""
     if payload is None:
-        return (
-            SessionRepository.count_recent(db, status),
-            SessionRepository.list_recent(db, limit, offset, status),
-        )
+        return _list_all_sessions(db, limit, offset, status_filter)
 
-    user_id = UUID(payload["sub"])
-    user = UsersRepository.get_by_id(db, user_id)
+    user_id, user = _resolve_session_actor(db, payload)
 
     if not user or user.role in ("admin", "superadmin"):
         if view == "mine":
-            return (
-                SessionRepository.count_by_user(db, user_id, status),
-                SessionRepository.list_by_user(db, user_id, limit, offset, status),
-            )
+            return _list_user_sessions(db, user_id, limit, offset, status_filter)
         if view == "assigned":
-            return (
-                SessionRepository.count_assigned_to_others(db, user_id, user_id, status),
-                SessionRepository.list_assigned_to_others(db, user_id, user_id, limit, offset, status),
-            )
-        return (
-            SessionRepository.count_recent(db, status),
-            SessionRepository.list_recent(db, limit, offset, status),
-        )
+            return _list_assigned_sessions(db, user_id, limit, offset, status_filter)
+        return _list_all_sessions(db, limit, offset, status_filter)
 
     if user.role == "teacher":
         if view == "assigned":
-            return (
-                SessionRepository.count_assigned_to_others(db, user_id, user_id, status),
-                SessionRepository.list_assigned_to_others(db, user_id, user_id, limit, offset, status),
-            )
-        return (
-            SessionRepository.count_by_user(db, user_id, status),
-            SessionRepository.list_by_user(db, user_id, limit, offset, status),
-        )
+            return _list_assigned_sessions(db, user_id, limit, offset, status_filter)
+        return _list_user_sessions(db, user_id, limit, offset, status_filter)
 
-    return (
-        SessionRepository.count_by_user(db, user_id, status),
-        SessionRepository.list_by_user(db, user_id, limit, offset, status),
+    return _list_user_sessions(db, user_id, limit, offset, status_filter)
+
+
+def _resolve_start_session_actor(payload: dict | None) -> UUID | None:
+    return UUID(payload["sub"]) if payload else None
+
+
+def _apply_manual_session_close(session, closing_kind: str | None) -> None:
+    session.ended_at = datetime.now(timezone.utc)
+    session.status = "terminated" if closing_kind in ("crisis", "inappropriate") else "completed"
+
+
+class EndSessionBody(BaseModel):
+    closing_kind: Optional[str] = Field(
+        None,
+        description=(
+            "Motivo de cierre manual: `success`, `crisis` o `inappropriate`. "
+            "Si se omite, la sesión se marca como `completed`."
+        ),
+        examples=["success"],
     )
+
+    model_config = {
+        "json_schema_extra": {"example": {"closing_kind": "success"}}
+    }
+
+
+class TimeFlushBody(BaseModel):
+    delta_seconds: int = Field(
+        ...,
+        ge=0,
+        le=600,
+        description=(
+            "Segundos de práctica transcurridos desde el último flush. "
+            "Máximo 600 segundos por llamada para evitar datos inconsistentes."
+        ),
+        examples=[60],
+    )
+
+    model_config = {
+        "json_schema_extra": {"example": {"delta_seconds": 60}}
+    }
+
+
+class EndSessionResponse(BaseModel):
+    message: str = Field(..., description="Mensaje corto de confirmación.")
+    session_id: UUID = Field(..., description="UUID de la sesión cerrada.")
+    ended_at: datetime = Field(..., description="Fecha y hora efectiva de cierre (UTC).")
+    status: str = Field(..., description="Estado final de la sesión tras el cierre.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "message": "Session ended successfully",
+                "session_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                "ended_at": "2025-05-10T09:30:00Z",
+                "status": "completed",
+            }
+        }
+    }
 
 
 @router.get(
     "/",
     response_model=PaginatedSessionsResponse,
-    summary="Listar sesiones (paginado)",
+    summary="Listar sesiones",
     description=(
         "Devuelve sesiones paginadas con filtrado por rol:\n\n"
-        "- **Sin auth / admin**: todas las sesiones del sistema.\n"
-        "- **teacher** (default / `view=mine`): sesiones propias. "
-        "`view=assigned` devuelve sesiones asignadas a otros usuarios.\n"
-        "- **student**: siempre solo sus propias sesiones.\n\n"
+        "- Sin auth o `admin`: todas las sesiones.\n"
+        "- `teacher`: por defecto sus propias sesiones; `view=assigned` devuelve sesiones asignadas a otros usuarios.\n"
+        "- `student`: siempre solo sus propias sesiones.\n\n"
         "El parámetro `status` filtra por estado: `active`, `completed` o `terminated`."
     ),
     response_description="Página de sesiones con metadatos de paginación.",
 )
 def list_sessions(
-    page: int = Query(1, ge=1, description="Número de página (base 1)."),
-    limit: int = Query(20, ge=1, le=100, description="Máximo de ítems por página (1–100)."),
+    page: int = Query(1, ge=1, description="Número de página, base 1."),
+    limit: int = Query(20, ge=1, le=100, description="Cantidad máxima de ítems por página."),
     view: Optional[str] = Query(None, description="Filtro de vista: `mine` o `assigned`."),
-    status: Optional[str] = Query(None, description="Filtro por estado: `active`, `completed`, `terminated`."),
+    status_filter: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filtro por estado: `active`, `completed` o `terminated`.",
+    ),
     db: Session = Depends(get_db),
     payload: dict | None = Depends(optional_jwt),
 ):
     offset = (page - 1) * limit
-    total, items = _paginated_sessions(db, payload, view, status, limit, offset)
+    total, items = _paginated_sessions(db, payload, view, status_filter, limit, offset)
     pages = max(1, math.ceil(total / limit))
     model_map = _last_model_map(db, [s.id for s in items])
     session_items = [
-        SessionResponse.model_validate(s).model_copy(
-            update={"last_ai_model": model_map.get(str(s.id))}
-        )
+        SessionResponse.model_validate(s).model_copy(update={"last_ai_model": model_map.get(str(s.id))})
         for s in items
     ]
     return PaginatedSessionsResponse(items=session_items, total=total, page=page, pages=pages, limit=limit)
-
-
 
 
 @router.post(
@@ -144,8 +255,9 @@ def list_sessions(
     summary="Iniciar sesión",
     description=(
         "Crea e inicia una nueva sesión vinculando un perfil de personaje simulado con un escenario. "
-        "La severidad inicial se toma directamente del escenario. "
-        "`user_id` y `assigned_by` se pueden omitir si hay JWT presente (se infieren del token)."
+        "La severidad inicial se toma directamente del escenario.\n\n"
+        "Si existe JWT, `user_id` y `assigned_by` pueden omitirse y se infieren automáticamente "
+        "desde el token."
     ),
     response_description="Sesión creada en estado `active`.",
     responses={404: {"description": "Perfil o escenario no encontrado"}},
@@ -161,13 +273,14 @@ def start_session(
     if not profile or not scenario:
         raise HTTPException(status_code=404, detail="Profile or Scenario not found")
 
-    caller_id = UUID(payload["sub"]) if payload else None
-
+    caller_id = _resolve_start_session_actor(payload)
     assigned_by = payload_data.assigned_by or caller_id
     user_id = payload_data.user_id or caller_id
 
     return SessionRepository.start(
-        db, profile.id, scenario,
+        db,
+        profile.id,
+        scenario,
         profile=profile,
         user_id=user_id,
         assigned_by=assigned_by,
@@ -192,52 +305,15 @@ def get_session(
     return session
 
 
-class EndSessionBody(BaseModel):
-    closing_kind: Optional[str] = Field(
-        None,
-        description=(
-            "Motivo de cierre manual: "
-            "`success` (resolución positiva), "
-            "`crisis` (alta severidad), "
-            "`inappropriate` (comportamiento inapropiado). "
-            "Si se omite, la sesión se marca como `completed`."
-        ),
-        examples=["success"],
-    )
-
-    model_config = {
-        "json_schema_extra": {"example": {"closing_kind": "success"}}
-    }
-
-
-class TimeFlushBody(BaseModel):
-    delta_seconds: int = Field(
-        ...,
-        ge=0,
-        le=600,
-        description=(
-            "Segundos de práctica transcurridos desde el último flush. "
-            "Máximo 600 s (10 min) por llamada para evitar corrupción de datos."
-        ),
-        examples=[60],
-    )
-
-    model_config = {
-        "json_schema_extra": {"example": {"delta_seconds": 60}}
-    }
-
-
 @router.patch(
     "/{session_id}/time",
     response_model=SessionResponse,
-    summary="Reportar tiempo de práctica (PATCH)",
+    summary="Reportar tiempo de práctica",
     description=(
-        "Acumula el tiempo de práctica reportado por el frontend. "
+        "Acumula tiempo de práctica reportado por el frontend. "
         "Marca `time_source='explicit'` en el primer llamado. "
-        "Ignorado silenciosamente si la sesión ya está cerrada. "
-        "`delta_seconds` está limitado a 600 s por flush para prevenir datos inconsistentes.\n\n"
-        "**Nota**: existe un alias `POST /{session_id}/time` porque `navigator.sendBeacon` "
-        "solo soporta POST."
+        "Si la sesión ya está cerrada, la operación se ignora silenciosamente.\n\n"
+        "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses=_404,
@@ -245,11 +321,10 @@ class TimeFlushBody(BaseModel):
 @router.post(
     "/{session_id}/time",
     response_model=SessionResponse,
-    summary="Reportar tiempo de práctica (POST / sendBeacon)",
+    summary="Alias POST para reportar tiempo",
     description=(
-        "Alias POST de `PATCH /{session_id}/time`. "
-        "Necesario porque `navigator.sendBeacon` solo soporta POST. "
-        "Comportamiento idéntico al PATCH."
+        "Alias de `PATCH /{session_id}/time`, útil para integraciones que solo soportan POST, "
+        "como `navigator.sendBeacon`."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses=_404,
@@ -268,18 +343,17 @@ def flush_time(
 
 @router.patch(
     "/{session_id}/end",
+    response_model=EndSessionResponse,
     summary="Cerrar sesión",
     description=(
         "Finaliza una sesión activa. "
-        "Registra `ended_at`, actualiza el `status` según el `closing_kind` y "
-        "dispara el cálculo de métricas automáticas de evaluación.\n\n"
-        "| `closing_kind` | `status` resultante |\n"
-        "|---|---|\n"
-        "| `success` o `null` | `completed` |\n"
-        "| `crisis` | `terminated` |\n"
-        "| `inappropriate` | `terminated` |"
+        "Registra `ended_at`, actualiza el `status` según el `closing_kind` y dispara "
+        "el cálculo de métricas automáticas de evaluación.\n\n"
+        "- `success` o `null` -> `completed`\n"
+        "- `crisis` -> `terminated`\n"
+        "- `inappropriate` -> `terminated`"
     ),
-    response_description="Confirmación de cierre con `session_id`, `ended_at` y `status`.",
+    response_description="Confirmación de cierre con estado final.",
     responses={**_404, **_400},
 )
 def end_session(
@@ -294,20 +368,9 @@ def end_session(
     if session.ended_at:
         raise HTTPException(status_code=400, detail="Session already ended")
 
-    session.ended_at = datetime.now(timezone.utc)
-    session.status = 'terminated' if body.closing_kind in ('crisis', 'inappropriate') else 'completed'
-    db.commit()
-
-    try:
-        finalize_session_time(db, session)
-        db.commit()
-    except Exception as exc:
-        print(f"[sessions.end] finalize_session_time fallo: {type(exc).__name__}: {exc}")
-
-    try:
-        run_auto_evaluation(db, session.id)
-    except Exception as exc:
-        print(f"[sessions.end] run_auto_evaluation fallo: {type(exc).__name__}: {exc}")
+    _apply_manual_session_close(session, body.closing_kind)
+    _commit_session_update(db, session.id, source="sessions.end")
+    _run_post_close_hooks(db, session)
 
     return {
         "message": "Session ended successfully",
