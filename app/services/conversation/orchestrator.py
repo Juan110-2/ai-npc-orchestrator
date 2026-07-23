@@ -662,7 +662,7 @@ class ConversationOrchestrator:
         """
         if closing_kind == "success":
             return (
-                "Gracias por escucharme. La verdad me siento mas tranquila ahora. "
+                "Gracias por escucharme. La verdad me siento mas a gusto ahora. "
                 "Me ayudo mucho hablar de esto contigo. Voy a tratar de descansar un poco. "
                 "Cuidate."
             )
@@ -673,7 +673,7 @@ class ConversationOrchestrator:
             )
         if closing_kind == "inappropriate":
             return (
-                "No me siento comodo siguiendo esta conversacion. Voy a terminarla aqui. "
-                "Adios."
+                "No me siento a gusto siguiendo esta conversacion. Voy a terminarla aqui. "
+                "Adiós."
             )
         return "Voy a tener que irme ahora. Gracias por el tiempo."
