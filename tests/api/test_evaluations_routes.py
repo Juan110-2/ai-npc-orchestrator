@@ -19,10 +19,10 @@ class TestEvaluationRoutes(unittest.TestCase):
     def test_get_active_rubric_returns_public_payload(self, mock_get_active):
         rubric = SimpleNamespace(
             id=uuid4(),
-            version="v1",
+            version=1,
             name="Rubrica",
             description="Desc",
-            criteria={"empathy": {"weight": 1}},
+            criteria=[{"key": "empathy", "label": "Empathy", "weight": 1, "max_score": 5}],
             is_active=True,
         )
         mock_get_active.return_value = rubric
