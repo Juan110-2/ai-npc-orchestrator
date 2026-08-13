@@ -1,7 +1,12 @@
+import socket
 import unittest
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from uuid import uuid4
 
+import pytest
+
+from app.core.config import DATABASE_URL
 from app.core.database import SessionLocal
 from app.models.conversation_message import ConversationMessage
 from app.models.profile import Profile
@@ -17,6 +22,30 @@ from app.schemas.profile import ProfileCreate, ProfileUpdate
 from app.schemas.scenario import ScenarioCreate, ScenarioUpdate
 
 
+def _database_reachable(database_url: str | None, timeout: float = 2.0) -> bool:
+    """Prueba una conexión TCP rápida a la base de datos, sin resolver DNS ni
+    conectar de más si no hay red disponible (evita colgar pytest en CI/offline)."""
+    if not database_url:
+        return False
+
+    parsed = urlparse(database_url)
+    if not parsed.hostname:
+        return False
+
+    try:
+        with socket.create_connection((parsed.hostname, parsed.port or 5432), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+_DATABASE_AVAILABLE = _database_reachable(DATABASE_URL)
+
+
+@pytest.mark.skipif(
+    not _DATABASE_AVAILABLE,
+    reason="DATABASE_URL no está definido o la base de datos no es alcanzable en este entorno",
+)
 class TestRepositoriesIntegration(unittest.TestCase):
     def setUp(self):
         self.db = SessionLocal()

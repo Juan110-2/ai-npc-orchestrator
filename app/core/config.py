@@ -25,8 +25,17 @@ OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
 DEEPSEEK_API_KEY: str | None = os.getenv("DEEPSEEK_API_KEY")
 
-# ----- Supabase Auth (opcional) ---------------------------------------------
+# ----- Supabase Auth ---------------------------------------------------------
+ALLOW_UNSECURE_MOCK_AUTH: bool = os.getenv("ALLOW_UNSECURE_MOCK_AUTH", "false").lower() == "true"
+
 SUPABASE_JWT_SECRET: str | None = os.getenv("SUPABASE_JWT_SECRET")
+if not SUPABASE_JWT_SECRET and not ALLOW_UNSECURE_MOCK_AUTH:
+    raise ValueError(
+        "SUPABASE_JWT_SECRET environment variable is not set. "
+        "Set it to a valid Supabase JWT secret, or set ALLOW_UNSECURE_MOCK_AUTH=true "
+        "to explicitly allow running without JWT validation (development only)."
+    )
+
 SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY: str | None = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_JWT_ISSUER: str | None = os.getenv("SUPABASE_JWT_ISSUER")

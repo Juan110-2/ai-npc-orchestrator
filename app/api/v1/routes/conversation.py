@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db
+from app.core.limiter import limiter
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.sessions_repository import SessionRepository
 from app.schemas.conversation_message import ConversationInput, ConversationMessageResponse
@@ -49,7 +50,9 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         404: {"description": "Sesion, perfil o escenario no encontrado"},
     },
 )
+@limiter.limit("10/minute")
 def converse(
+    request: Request,
     session_id: UUID,
     payload: ConversationInput,
     db: Session = Depends(get_db),
@@ -105,7 +108,9 @@ def converse(
         404: {"description": "Sesion, perfil o escenario no encontrado"},
     },
 )
+@limiter.limit("10/minute")
 def converse_stream(
+    request: Request,
     session_id: UUID,
     payload: ConversationInput,
     db: Session = Depends(get_db),

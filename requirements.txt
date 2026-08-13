@@ -17,3 +17,6 @@ google-genai                  # Google Gemini (SDK unificado)
 # Autenticación JWT (Supabase)
 python-jose[cryptography]
 httpx                         # Cliente HTTP para proxy de Supabase Auth
+
+# Rate limiting
+slowapi

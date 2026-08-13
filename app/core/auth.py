@@ -2,10 +2,10 @@
 Middleware de autenticación JWT para Supabase.
 
 Comportamiento:
-- Si SUPABASE_JWT_SECRET está definido en el entorno, el middleware valida
-  el Bearer token de cada request entrante.
-- Si no está definido, el middleware se desactiva completamente.
-  Esto permite desarrollo local sin auth sin cambiar código.
+- SUPABASE_JWT_SECRET es obligatorio (ver app/core/config.py), salvo que se
+  active explícitamente ALLOW_UNSECURE_MOCK_AUTH=true para desarrollo local.
+- Los tokens asimétricos (RS256/ES256/...) se validan contra el JWKS de Supabase
+  y no dependen de SUPABASE_JWT_SECRET.
 
 Uso en el frontend: el cliente envía el token de sesión de Supabase
 en el header Authorization: Bearer <token>.

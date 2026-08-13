@@ -4,8 +4,11 @@ from typing import get_args, get_origin
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.routes import admin, auth, conversation, evaluations, metrics, profiles, scenarios, sessions
+from app.core.limiter import limiter
 
 _DESCRIPTION = """
 API del orquestador de simulaciones con personajes NPC impulsados por IA.
@@ -52,7 +55,7 @@ Los endpoints protegidos requieren un JWT de Supabase:
 
 `Authorization: Bearer <token>`
 
-En modo desarrollo, si `SUPABASE_JWT_SECRET` no está configurado, varias rutas omiten autenticación.
+`SUPABASE_JWT_SECRET` es obligatorio salvo que `ALLOW_UNSECURE_MOCK_AUTH=true` (solo desarrollo local).
 
 ## Severidad emocional
 
@@ -219,6 +222,9 @@ def custom_openapi():
 
 
 app.openapi = custom_openapi
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 default_origins = ",".join(
     [
