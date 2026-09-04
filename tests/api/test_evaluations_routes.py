@@ -34,6 +34,39 @@ class TestEvaluationRoutes(unittest.TestCase):
         self.assertEqual(body["name"], "Rubrica")
         self.assertTrue(body["is_active"])
 
+    @patch("app.api.v1.routes.evaluations.RubricsRepository.get_active")
+    def test_get_active_rubric_matches_real_database_shape(self, mock_get_active):
+        """
+        RubricDefinition (app/models/rubric_definition.py) declara:
+          version  = Column(Integer, ...)   -> un entero, no un string
+          criteria = Column(JSONB, ...)     -> un arreglo de dicts, no un dict
+
+        Este test simula exactamente esa forma (la que Postgres realmente
+        devuelve), no la forma que asumia el schema de respuesta viejo.
+        Diagnostico de "no cargan las evaluaciones": DIAGNOSTICO.md
+        """
+        rubric = SimpleNamespace(
+            id=uuid4(),
+            version=1,
+            name="Rubrica",
+            description="Desc",
+            criteria=[
+                {"key": "empatia", "label": "Empatia", "weight": 0.5, "max_score": 5},
+                {"key": "claridad", "label": "Claridad", "weight": 0.5, "max_score": 5},
+            ],
+            is_active=True,
+        )
+        mock_get_active.return_value = rubric
+
+        response = self.client.get("/evaluation/rubric/active")
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            f"GET /evaluation/rubric/active fallo con datos reales (version=int, "
+            f"criteria=list). Body: {response.text}",
+        )
+
     @patch.object(evaluations_routes, "SUPABASE_JWT_SECRET", None)
     @patch("app.api.v1.routes.evaluations.run_auto_evaluation")
     @patch("app.api.v1.routes.evaluations.SessionRepository.get_by_id")

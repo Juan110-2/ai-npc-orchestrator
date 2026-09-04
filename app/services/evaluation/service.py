@@ -116,8 +116,8 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
             round(duration_minutes, 2) if duration_minutes is not None else None
         ),
         "duration_source": time_source,
-        "severity_peak": int(base["severity_peak"]) if base["severity_peak"] is not None else None,
-        "severity_final": int(base["severity_final"]) if base["severity_final"] is not None else None,
+        "severity_peak": round(float(base["severity_peak"]), 1) if base["severity_peak"] is not None else None,
+        "severity_final": round(float(base["severity_final"]), 1) if base["severity_final"] is not None else None,
         "risk_alerts_detected": int(risk_alerts or 0),
         "last_ai_model": last_model_row["ai_model"] if last_model_row else None,
         "classifier_calls_by_status": classifier_calls_by_status,
