@@ -86,23 +86,23 @@ class TeacherEvaluationInput(BaseModel):
 
 class RubricResponse(BaseModel):
     id: str
-    version: str
+    version: int
     name: str
     description: str | None = None
-    criteria: dict
+    criteria: list[dict]
     is_active: bool
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "id": "f6a7b8c9-d0e1-2345-abcd-456789012345",
-                "version": "v1",
+                "version": 1,
                 "name": "Rúbrica base",
                 "description": "Rúbrica principal para evaluación docente.",
-                "criteria": {
-                    "escucha_activa": {"weight": 0.3},
-                    "empatía": {"weight": 0.4},
-                },
+                "criteria": [
+                    {"key": "escucha_activa", "label": "Escucha activa", "weight": 0.3, "max_score": 5},
+                    {"key": "empatía", "label": "Empatía", "weight": 0.4, "max_score": 5},
+                ],
                 "is_active": True,
             }
         }
