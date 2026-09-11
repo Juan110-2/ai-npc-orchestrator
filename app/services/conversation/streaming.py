@@ -11,6 +11,7 @@ from app.services.conversation.constants import MAX_CLOSING_TURNS, MAX_RESPONSE_
 from app.services.conversation.core import (
     commit_with_rollback,
     finalize_session_in_generator,
+    maybe_close_on_npc_farewell,
     persist_patient_message,
     run_auto_evaluation_safely,
 )
@@ -306,6 +307,9 @@ def stream_response_generator(
             yield yield_error_event("DB commit failed")
             return
 
+        ctx = maybe_close_on_npc_farewell(
+            ctx=ctx, npc_text=state.accumulated, db=gen_db, session_id=session_id
+        )
         finalize_and_evaluate_stream(gen_db, session_id, ctx)
         yield yield_done_event(ctx, state)
     finally:

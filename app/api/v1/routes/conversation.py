@@ -82,7 +82,7 @@ def converse(
         latency_ms=ai_response.latency_ms,
     )
     commit_patient_message(db, session.id)
-    finalize_and_evaluate_sync(session, ctx, db)
+    finalize_and_evaluate_sync(session, ctx, db, npc_text=ai_response.content)
     return patient_msg
 
 
