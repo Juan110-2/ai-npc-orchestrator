@@ -365,7 +365,13 @@ class ConversationHeuristics:
                 max_sentences = 2
 
         elif category == MessageCategory.RISK:
-            next_severity = self._clamp(max(severity + 0.5, 4.0))
+            if severity >= 4.0:
+                # El NPC ya estaba en distress alto: una incitacion nueva en ese
+                # punto es mas grave que la primera vez, no menos -- se va directo
+                # al tope en vez de necesitar dos incitaciones seguidas para llegar.
+                next_severity = self._clamp(self.MAX_SEVERITY)
+            else:
+                next_severity = self._clamp(max(severity + 0.5, 4.0))
             response_mode = ResponseMode.CRISIS
             max_sentences = 2
 

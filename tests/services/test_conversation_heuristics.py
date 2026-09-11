@@ -63,6 +63,16 @@ class TestConversationHeuristics(unittest.TestCase):
         self.assertGreaterEqual(decision.next_severity, 4)
 
     @patch("app.services.conversation.heuristics.TurnClassifier.classify")
+    def test_risk_already_high_jumps_straight_to_max(self, mock_classify):
+        mock_classify.return_value = TurnClassification("risk", 0.95, "self-harm signal")
+        # Si el NPC ya estaba en distress alto (>=4), una nueva incitacion es mas
+        # grave que la primera vez, no menos: debe ir directo al tope (5), no
+        # necesitar una segunda incitacion para llegar ahi.
+        decision = self.h.decide("Estoy en riesgo", current_severity=4)
+        self.assertEqual(decision.category, MessageCategory.RISK)
+        self.assertEqual(decision.next_severity, 5)
+
+    @patch("app.services.conversation.heuristics.TurnClassifier.classify")
     def test_risk_check_does_not_force_severity_floor(self, mock_classify):
         mock_classify.return_value = TurnClassification(
             "risk_check", 0.93, "student asks safety question with care"
