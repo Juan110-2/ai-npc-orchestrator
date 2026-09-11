@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
@@ -27,7 +26,6 @@ from app.services.conversation.heuristics import (
     HeuristicDecision,
     MessageCategory,
 )
-from app.services.conversation.classifier import detect_npc_farewell
 from app.services.conversation.intervention_evaluator import evaluate_intervention
 from app.services.conversation.orchestrator import ConversationOrchestrator
 
@@ -297,30 +295,8 @@ def apply_closed_session_state(session, ctx: TurnContext) -> None:
         session.current_severity = ctx.b_min
     elif ctx.closing_kind == "crisis":
         session.current_severity = ctx.b_max
-    # "self_paced": el propio NPC decidio terminar/pausar (ver
-    # maybe_close_on_npc_farewell) -- no es exito ni crisis, se deja la
-    # severidad tal como quedo ese turno, sin forzarla a ningun extremo.
     session.status = "terminated" if ctx.closing_kind in ("crisis", "inappropriate") else "completed"
     session.ended_at = datetime.now(timezone.utc)
-
-
-def maybe_close_on_npc_farewell(
-    *, ctx: TurnContext, npc_text: str, db: Session, session_id: UUID
-) -> TurnContext:
-    """
-    Si la severidad por si sola no iba a cerrar la sesion, pero el NPC
-    genero una respuesta que en si misma expresa que quiere terminar/pausar
-    la conversacion, se cierra igual con esa misma respuesta (ya generada,
-    sin regenerar nada). El modelo puede decidir esto por su cuenta sin que
-    el diseño del sistema lo determine -- antes esa señal se ignoraba por
-    completo y la sesion se quedaba "activa" pese a que el personaje ya
-    habia dicho que queria parar.
-    """
-    if ctx.should_close:
-        return ctx
-    if not detect_npc_farewell(npc_text, db=db, session_id=session_id):
-        return ctx
-    return dataclasses.replace(ctx, should_close=True, closing_kind="self_paced")
 
 
 def commit_with_rollback(
@@ -578,8 +554,7 @@ def run_auto_evaluation_safely(db: Session, session_id: UUID, source: str) -> No
         logger.warning("[%s] run_auto_evaluation fallo", source, exc_info=True)
 
 
-def finalize_and_evaluate_sync(session, ctx: TurnContext, db: Session, npc_text: str = "") -> None:
-    ctx = maybe_close_on_npc_farewell(ctx=ctx, npc_text=npc_text, db=db, session_id=session.id)
+def finalize_and_evaluate_sync(session, ctx: TurnContext, db: Session) -> None:
     if not ctx.should_close:
         return
     finalize_session(session, ctx, db)
