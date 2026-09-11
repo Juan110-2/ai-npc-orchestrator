@@ -87,15 +87,16 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
     except Exception:
         classifier_calls_by_category = {}
 
-    # Conteo de turnos por response_mode (lo que decidio la heuristica).
-    # Como no esta persistido, lo recalculamos directo de risk_flags + severidad.
-    # Versiones futuras podrian persistir la categoria del turno del trainee.
+    # Turnos del NPC cuyo contenido fue clasificado como RIESGO real
+    # (ideacion, dano, etc.), leyendo el risk_flags que persiste cada turno.
+    # OJO: esto NO es lo mismo que "severidad alta" -- un caso de crisis puede
+    # tener severidad >=4 en todos sus turnos sin que haya riesgo real en ellos.
     risk_alerts = db.execute(text("""
         select count(*)::int as n
         from public.conversation_messages
         where session_id = :sid
           and role = 'patient'
-          and severity >= 4
+          and risk_flags @> '["risk"]'::jsonb
     """), {"sid": str(session_id)}).mappings().one()["n"]
 
     last_model_row = db.execute(text("""

@@ -87,6 +87,7 @@ class MessageCategory(str, Enum):
     INVALIDATING = "invalidating"
     INAPPROPRIATE = "inappropriate"
     RISK = "risk"
+    RISK_CHECK = "risk_check"
 
 
 class ResponseMode(str, Enum):
@@ -112,7 +113,7 @@ class HeuristicDecision:
 class ConversationHeuristics:
     """Reglas rápidas y determinísticas para clasificar un turno y ajustar estado."""
 
-    MIN_SEVERITY = 0   # 0 = paciente calmado, sesión puede cerrar
+    MIN_SEVERITY = 0   # 0 = NPC calmado, sesión puede cerrar
     MAX_SEVERITY = 5   # 5 = crisis, sesión cierra automáticamente
     _ABUSE_HISTORY_WINDOW = 10  # Turnos recientes del trainee a revisar para reincidencia
 
@@ -318,7 +319,7 @@ class ConversationHeuristics:
             # Así se requiere calidad sostenida, no solo intención positiva.
             next_severity = severity
             response_mode = ResponseMode.EMPATHIC
-            # Pregunta abierta real: el paciente tiene más para decir en respuesta.
+            # Pregunta abierta real: el NPC tiene más para decir en respuesta.
             max_sentences = 4 if has_question else 3
 
         elif category == MessageCategory.INDIFFERENT:
@@ -330,12 +331,12 @@ class ConversationHeuristics:
         elif category == MessageCategory.NEUTRAL:
             next_severity = severity
             response_mode = ResponseMode.NEUTRAL
-            # Pregunta abierta real: el paciente tiene más para decir en respuesta.
+            # Pregunta abierta real: el NPC tiene más para decir en respuesta.
             max_sentences = 4 if has_question else 3
 
         elif category == MessageCategory.CONFUSING:
             # has_question no amplía max_sentences aquí: si el mensaje fue clasificado
-            # como confuso, el paciente responde brevemente para pedir aclaración, sin
+            # como confuso, el NPC responde brevemente para pedir aclaración, sin
             # importar si contenía un signo de pregunta.
             next_severity = severity
             should_rotate_focus = True
@@ -367,18 +368,26 @@ class ConversationHeuristics:
             next_severity = self._clamp(max(severity + 0.5, 4.0))
             response_mode = ResponseMode.CRISIS
             max_sentences = 2
-            if severity >= 4:
-                should_close = True
 
-        # Cierre por deterioro máximo: al llegar al pico de severidad con un turno adverso,
-        # se termina la sesión para representar "peor escenario" de forma controlada.
+        elif category == MessageCategory.RISK_CHECK:
+            # El estudiante pregunta bien por riesgo (intervencion clinica
+            # correcta), no incita nada -- no se fuerza ningun piso de
+            # severidad. El NPC responde con honestidad segun su propio
+            # estado real, guiado como una intervencion de cuidado.
+            next_severity = severity
+            response_mode = ResponseMode.EMPATHIC
+            max_sentences = 3
+
+        # Ajuste de tono al llegar al pico de severidad con un turno adverso.
+        # NO se fuerza el cierre aqui: eso lo decide compute_closing_state (core.py),
+        # que da una fase de gracia de MAX_CLOSING_TURNS antes de la despedida final.
+        # El unico cierre inmediato sin fase de gracia es el abuso reincidente, arriba.
         if next_severity >= self.MAX_SEVERITY and category in (
             MessageCategory.RISK,
             MessageCategory.INDIFFERENT,
             MessageCategory.INVALIDATING,
             MessageCategory.INAPPROPRIATE,
         ):
-            should_close = True
             if category == MessageCategory.RISK:
                 response_mode = ResponseMode.CRISIS
             elif response_mode == ResponseMode.NEUTRAL:

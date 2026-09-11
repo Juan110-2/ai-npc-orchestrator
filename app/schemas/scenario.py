@@ -41,7 +41,8 @@ class ScenarioCreate(BaseModel):
         default=[],
         description=(
             "Indicadores de riesgo presentes en el escenario. "
-            "Influyen en la lógica de cierre automático de la sesión."
+            "Son un rasgo permanente del personaje: se inyectan como contexto en el prompt "
+            "('Indicadores presentes: ...'), no en la lógica de cierre automático de la sesión."
         ),
         examples=[["ideación_pasiva", "aislamiento_social"]],
     )

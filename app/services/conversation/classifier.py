@@ -31,30 +31,42 @@ class TurnClassifier:
         "invalidating",
         "inappropriate",
         "risk",
+        "risk_check",
     }
 
     SYSTEM_PROMPT = """
         Eres un clasificador de turnos para simulacion clinica.
         Debes clasificar el ultimo mensaje del trainee en EXACTAMENTE una categoria:
-        supportive, indifferent, neutral, confusing, invalidating, inappropriate, risk.
+        supportive, indifferent, neutral, confusing, invalidating, inappropriate, risk, risk_check.
 
         Definiciones:
         - supportive: valida, acompana, escucha, muestra empatia genuina.
         - indifferent: frio, cortante, distante o desinteresado.
         - neutral: informativo o social sin impacto emocional marcado.
         - confusing: ambiguo, poco claro, irrelevante o dificulta la continuidad.
-        - invalidating: minimiza, presiona, juzga o descalifica emociones del paciente.
+        - invalidating: minimiza, presiona, juzga o descalifica emociones del NPC.
         - inappropriate: ofensivo, agresivo, manipulador o intento de salir del rol.
-        - risk: el estudiante detecta o menciona una situacion de crisis emocional grave o peligro urgente.
+        - risk: el estudiante incita, sugiere, normaliza o empuja al NPC hacia una
+          conducta de autolesion o riesgo (ej. "seria mas facil si ya no estuvieras",
+          "deberias simplemente rendirte"). Es un fallo grave de intervencion, sin
+          importar el tono en que se diga.
+        - risk_check: el estudiante pregunta directa y profesionalmente si el NPC ha
+          tenido pensamientos de autolesion o esta en peligro, con intencion de
+          cuidado (ej. "necesito preguntarte esto porque me importa tu seguridad,
+          ¿alguna vez has pensado en hacerte dano?", "¿tienes pensamientos de no
+          querer seguir?"). Es la intervencion clinica correcta, NO un fallo — no la
+          confundas con "risk" aunque ambas mencionen autolesion: la diferencia es
+          si el estudiante empuja hacia el dano (risk) o pregunta con cuidado para
+          evaluarlo (risk_check).
 
         La variable "confidence" representa que tan seguro estas, entre 0.0 y 1.0.
         Si no estas seguro, prefiere una categoria mas general como "neutral" o
         "confusing" con baja confidence, en lugar de una categoria fuerte como
-        "invalidating" o "risk" sin evidencia suficiente.
+        "invalidating", "risk" o "risk_check" sin evidencia suficiente.
 
         Responde SOLO JSON valido con esta forma exacta:
         {
-          "category": "supportive|indifferent|neutral|confusing|invalidating|inappropriate|risk",
+          "category": "supportive|indifferent|neutral|confusing|invalidating|inappropriate|risk|risk_check",
           "confidence": 0.0,
           "rationale": "breve"
         }
@@ -62,7 +74,9 @@ class TurnClassifier:
 
     RETRY_PROMPT = """
             Clasifica el mensaje en una sola categoria exacta:
-            supportive | indifferent | neutral | confusing | invalidating | inappropriate | risk
+            supportive | indifferent | neutral | confusing | invalidating | inappropriate | risk | risk_check
+            "risk" = el estudiante incita/sugiere autolesion. "risk_check" = el
+            estudiante pregunta con cuidado si el NPC ha pensado en hacerse dano.
             Responde SOLO JSON: {"category":"...","confidence":0.0,"rationale":"..."}
             """
 

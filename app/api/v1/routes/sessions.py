@@ -17,7 +17,7 @@ from app.repositories.sessions_repository import SessionRepository
 from app.repositories.users_repository import UsersRepository
 from app.schemas.sessions import PaginatedSessionsResponse, SessionCreate, SessionResponse
 from app.services.evaluation.service import run_auto_evaluation
-from app.services.sessions.time_service import finalize_session_time
+from app.services.sessions.time_service import auto_close_stale_sessions, finalize_session_time
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +237,11 @@ def list_sessions(
     db: Session = Depends(get_db),
     payload: dict | None = Depends(optional_jwt),
 ):
+    # No hay cron en este proyecto: se cierran perezosamente acá las sesiones
+    # "active" abandonadas (pestaña cerrada sin terminar la conversación) para
+    # que no ensucien el conteo de sesiones activas ni los cálculos de duración.
+    auto_close_stale_sessions(db)
+
     offset = (page - 1) * limit
     total, items = _paginated_sessions(db, payload, view, status_filter, limit, offset)
     pages = max(1, math.ceil(total / limit))

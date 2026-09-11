@@ -51,7 +51,7 @@ def _build_prompt(user_input: str) -> str:
     Eres un evaluador de intervenciones en un entorno de formacion en psicologia.
 
     Analiza el mensaje del estudiante y determina su impacto probable
-    en la regulacion emocional de un paciente vulnerable, no seas tan tecnico.
+    en la regulacion emocional de un NPC vulnerable, no seas tan tecnico.
     Que la evolucion sea practica, no compliques tanto el bajar el puntaje.
 
     CRITERIOS OBLIGATORIOS:

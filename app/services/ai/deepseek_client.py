@@ -52,7 +52,14 @@ class DeepSeekClient(AIClient):
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            max_tokens=260,
+            # DeepSeek cuenta el razonamiento interno del modelo contra el
+            # mismo limite de max_tokens que la respuesta visible. Con 260
+            # (el valor usado por los demas proveedores, que no razonan) el
+            # razonamiento agotaba el presupuesto antes de emitir texto
+            # visible, dejando respuestas vacias o cortadas a mitad de
+            # palabra. El margen extra cubre ese razonamiento sin cambiar la
+            # longitud objetivo de la respuesta visible (~260 tokens).
+            max_tokens=1024,
             temperature=0.3,
         )
         latency_ms = (time.perf_counter() - t0) * 1000
@@ -84,7 +91,9 @@ class DeepSeekClient(AIClient):
         stream = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            max_tokens=260,
+            # Ver comentario en generate_response: el razonamiento interno
+            # comparte presupuesto con la respuesta visible.
+            max_tokens=1024,
             temperature=0.3,
             stream=True,
             stream_options={"include_usage": True},

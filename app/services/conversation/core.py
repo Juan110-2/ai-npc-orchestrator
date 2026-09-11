@@ -231,36 +231,35 @@ def compute_closing_state(
     b_min: float = 0.0,
     b_max: float = 5.0,
 ) -> dict | None:
+    # El techo usa el mismo colchón de 0.5 que el piso: un turno de RIESGO que
+    # sube la severidad a, por ejemplo, 4.8 (sin tocar el 5 exacto) debe entrar
+    # igual a la fase de gracia, no quedarse fuera por no llegar al numero exacto.
+    top_threshold = b_max - 0.5
     at_bottom = current_severity <= b_min + 0.5
-    at_top = current_severity >= b_max
+    at_top = current_severity >= top_threshold
     if not at_bottom and not at_top:
         return None
 
-    started_at_bottom = base_severity is not None and base_severity <= b_min + 0.5
-    started_at_top = base_severity is not None and base_severity >= b_max
     crossed_this_turn = (
         previous_severity is not None
         and (
             (at_bottom and previous_severity > b_min + 0.5 and current_severity <= b_min + 0.5)
-            or (at_top and previous_severity < b_max and current_severity >= b_max)
+            or (at_top and previous_severity < top_threshold and current_severity >= top_threshold)
         )
     )
 
-    ignore_initial_boundary = (
-        previous_severity is not None
-        and not crossed_this_turn
-        and (
-            (at_bottom and started_at_bottom and previous_severity <= b_min + 0.5)
-            or (at_top and started_at_top and previous_severity >= b_max)
-        )
-    )
-    if ignore_initial_boundary:
-        return None
+    # Nota: ya no hay una guarda aparte para "escenario que arranca en el limite".
+    # El chequeo de mas abajo (not crossed_this_turn and patient_turns == 0) ya
+    # cubre exactamente ese caso -- turno 1 sin historial previo en la frontera,
+    # sin cruce fresco, no cuenta. Una guarda aparte comparando previous_severity
+    # contra el limite se queda "encendida" indefinidamente en un caso de crisis
+    # que ronda el techo sin bajar del todo, y la sesion nunca llega a la fase de
+    # gracia ni se despide -- por eso se quito.
 
     boundary_check = (
         (lambda sev: sev <= b_min + 0.5)
         if at_bottom
-        else (lambda sev: sev >= b_max)
+        else (lambda sev: sev >= top_threshold)
     )
 
     patient_turns = 0
@@ -277,12 +276,12 @@ def compute_closing_state(
 
     if at_bottom:
         kind = "success"
+    elif decision and decision.category == MessageCategory.INAPPROPRIATE:
+        kind = "inappropriate"
+    elif decision and decision.category == MessageCategory.RISK:
+        kind = "crisis_riesgo"
     else:
-        kind = (
-            "inappropriate"
-            if decision and decision.category == MessageCategory.INAPPROPRIATE
-            else "crisis"
-        )
+        kind = "crisis"
 
     return {
         "kind": kind,
@@ -417,14 +416,19 @@ def _process_turn_inner(session, profile, user_input: str, db: Session) -> TurnC
         b_max=b_max,
     )
 
+    # forced_close solo es True para abuso reincidente (heuristics.py): ese es el
+    # unico caso que se salta la fase de gracia y cierra en el mismo turno, con
+    # dignidad para el estudiante que ya recibio el limite. Cualquier otro cierre
+    # (riesgo, colapso emocional, primer trato inadecuado) pasa por la fase de
+    # gracia de compute_closing_state, que da MAX_CLOSING_TURNS antes de despedirse.
     should_close = False
     closing_kind: str | None = None
-    if forced_close and closing is None:
+    if forced_close:
         should_close = True
         closing_kind = "inappropriate"
     elif closing is not None:
         closing_kind = closing["kind"]
-        if closing["patient_turns"] >= MAX_CLOSING_TURNS - 1 or forced_close:
+        if closing["patient_turns"] >= MAX_CLOSING_TURNS - 1:
             should_close = True
 
     behavioral_flags: list[str] = []
@@ -434,6 +438,8 @@ def _process_turn_inner(session, profile, user_input: str, db: Session) -> TurnC
             behavioral_flags.append("repeat_abuse")
     elif decision.category == MessageCategory.RISK:
         behavioral_flags.append("risk")
+    elif decision.category == MessageCategory.RISK_CHECK:
+        behavioral_flags.append("risk_check")
 
     return TurnContext(
         decision=decision,
@@ -465,6 +471,10 @@ def generate_sync_ai_response(
             current_severity=ctx.final_severity,
             closing_kind=ctx.closing_kind,
             conversation_history=ctx.context_history,
+            user_input=user_input,
+            response_mode=ctx.decision.response_mode.value,
+            max_sentences=ctx.decision.max_sentences,
+            should_rotate_focus=ctx.decision.should_rotate_focus,
             db=db,
             session_id=session.id,
         )

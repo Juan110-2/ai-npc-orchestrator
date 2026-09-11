@@ -5,22 +5,8 @@ PARALLEL_TIMEOUT_S = 20.0
 MAX_RESPONSE_CHARS = 8_000
 HISTORY_LIMIT = 10
 
-CLOSING_INSTR: dict[str, str] = {
-    "success": (
-        "La conversacion ha logrado calmarte. Despidete agradeciendo de manera "
-        "concreta por la ayuda recibida sobre tu situacion especifica "
-        "(mencionala brevemente). Expresa alivio real y un cierre amable. "
-        "No introduzcas problemas nuevos."
-    ),
-    "crisis": (
-        "Estas en crisis emocional intensa (severidad 5). No puedes sostener "
-        "mas la conversacion. Despidete brevemente mencionando que tu situacion "
-        "concreta te tiene desbordado y que necesitas parar ahora. "
-        "Tono breve, emocional, sin agresividad."
-    ),
-    "inappropriate": (
-        "El usuario te trato de manera inadecuada y vas a cerrar la conversacion "
-        "con dignidad. Despidete brevemente marcando un limite claro y firme. "
-        "Sin agresividad, pero con firmeza. Una o dos frases maximo."
-    ),
-}
+# NOTA: la instruccion de despedida por closing_kind ("CLOSING_INSTR") se quito
+# de aqui. Se probo que el LLM la ignora la mayoria de las veces sin importar el
+# tipo de cierre, asi que el turno final ahora se genera SIN esa instruccion (como
+# un turno normal) y la despedida garantizada se concatena aparte -- ver
+# ConversationOrchestrator._CLOSING_TAILS / ensure_closing_tail en orchestrator.py.

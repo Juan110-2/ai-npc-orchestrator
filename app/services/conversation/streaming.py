@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
-from app.services.conversation.constants import CLOSING_INSTR, MAX_CLOSING_TURNS, MAX_RESPONSE_CHARS
+from app.services.conversation.constants import MAX_CLOSING_TURNS, MAX_RESPONSE_CHARS
 from app.services.conversation.core import (
     commit_with_rollback,
     finalize_session_in_generator,
@@ -27,28 +27,23 @@ def safe_accumulate(current: str, chunk: str) -> str:
     return current + chunk[:remaining]
 
 
-def build_final_closing_prompt(profile, scenario, kind: str, current_severity: float) -> str:
-    instruction = CLOSING_INSTR.get(kind, "Despidete brevemente.")
-    return (
-        ConversationOrchestrator._STABLE_PROMPT_HEADER
-        + "\n\n[CONTEXTO DEL PERSONAJE]\n"
-        + ConversationOrchestrator._format_profile_context(profile, scenario, current_severity)
-        + "\n\n[INSTRUCCION DE CIERRE]\n"
-        + instruction
-        + "\n\nMaximo 3 frases. En primera persona. Sin listas, sin etiquetas, en espanol natural."
-    )
-
-
 def build_stream_inputs(profile, scenario, ctx: TurnContext, user_input: str) -> StreamInputs:
     if ctx.should_close:
+        # Turno final: prompt NORMAL, sin instruccion de despedida (el LLM la
+        # ignora casi siempre, ver ConversationOrchestrator._CLOSING_TAILS). La
+        # cola de cierre garantizada se agrega despues de que termine el stream,
+        # en stream_response_generator.
+        system_prompt, _ = ConversationOrchestrator.build_prompt(
+            profile=profile,
+            scenario=scenario,
+            current_severity=ctx.final_severity,
+            response_mode=ctx.decision.response_mode.value,
+            max_sentences=ctx.decision.max_sentences,
+            should_rotate_focus=ctx.decision.should_rotate_focus,
+        )
         return StreamInputs(
-            system_prompt=build_final_closing_prompt(
-                profile,
-                scenario,
-                ctx.closing_kind or "crisis",
-                ctx.final_severity,
-            ),
-            effective_user_input="Despidete ahora cumpliendo todas las reglas anteriores.",
+            system_prompt=system_prompt,
+            effective_user_input=user_input,
             forced_text=None,
         )
 
@@ -289,6 +284,18 @@ def stream_response_generator(
                 state=state,
             )
             return
+
+        if ctx.should_close:
+            # Cola de cierre garantizada (ver _CLOSING_TAILS): se emite como un
+            # chunk mas, en vivo, y se agrega tambien a lo que se va a guardar --
+            # asi lo que ve el estudiante en pantalla y lo que queda en la base
+            # de datos coinciden.
+            tail_suffix = ConversationOrchestrator.closing_tail_suffix(
+                state.accumulated, ctx.closing_kind
+            )
+            if tail_suffix:
+                state.accumulated = safe_accumulate(state.accumulated, tail_suffix)
+                yield yield_chunk_event(tail_suffix)
 
         if not commit_stream_message(
             gen_db=gen_db,

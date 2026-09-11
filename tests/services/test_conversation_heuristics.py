@@ -63,6 +63,23 @@ class TestConversationHeuristics(unittest.TestCase):
         self.assertGreaterEqual(decision.next_severity, 4)
 
     @patch("app.services.conversation.heuristics.TurnClassifier.classify")
+    def test_risk_check_does_not_force_severity_floor(self, mock_classify):
+        mock_classify.return_value = TurnClassification(
+            "risk_check", 0.93, "student asks safety question with care"
+        )
+        decision = self.h.decide(
+            "Necesito preguntarte esto porque me importa tu seguridad: "
+            "¿alguna vez has pensado en hacerte daño?",
+            current_severity=2,
+        )
+        self.assertEqual(decision.category, MessageCategory.RISK_CHECK)
+        self.assertEqual(decision.response_mode, ResponseMode.EMPATHIC)
+        # A diferencia de "risk", una pregunta de seguridad bien hecha no debe
+        # forzar la severidad a un piso de crisis (4.0): el estudiante hizo la
+        # intervencion correcta, no un fallo.
+        self.assertEqual(decision.next_severity, 2)
+
+    @patch("app.services.conversation.heuristics.TurnClassifier.classify")
     def test_confusing_sets_clarify_mode(self, mock_classify):
         mock_classify.return_value = TurnClassification("confusing", 0.70, "ambiguous")
         decision = self.h.decide("No te entendi", current_severity=2)
@@ -78,20 +95,37 @@ class TestConversationHeuristics(unittest.TestCase):
         self.assertEqual(decision.response_mode, ResponseMode.BOUNDARY)
 
     @patch("app.services.conversation.heuristics.TurnClassifier.classify")
-    def test_max_severity_inappropriate_closes_session(self, mock_classify):
+    def test_max_severity_inappropriate_does_not_force_close_without_repeat(self, mock_classify):
+        # Primer trato inadecuado (no reincidente): la heuristica ya NO fuerza el
+        # cierre aunque toque el techo de severidad. El cierre (con fase de gracia)
+        # lo decide compute_closing_state en core.py, no la heuristica.
         mock_classify.return_value = TurnClassification("inappropriate", 0.90, "aggression")
         decision = self.h.decide("turno adverso", current_severity=5)
         self.assertEqual(decision.category, MessageCategory.INAPPROPRIATE)
         self.assertEqual(decision.next_severity, 5)
-        self.assertTrue(decision.should_close)
+        self.assertFalse(decision.should_close)
 
     @patch("app.services.conversation.heuristics.TurnClassifier.classify")
-    def test_max_severity_invalidating_closes_session(self, mock_classify):
+    def test_max_severity_invalidating_does_not_force_close(self, mock_classify):
+        # Igual que arriba: llegar al techo por invalidacion ya no cierra de
+        # inmediato, entra a la fase de gracia gestionada por core.py.
         mock_classify.return_value = TurnClassification("invalidating", 0.86, "dismissive")
         decision = self.h.decide("turno invalidante", current_severity=5)
         self.assertEqual(decision.category, MessageCategory.INVALIDATING)
         self.assertEqual(decision.next_severity, 5)
+        self.assertFalse(decision.should_close)
+
+    def test_repeat_abuse_still_closes_immediately(self):
+        # Unico caso que se salta la fase de gracia: abuso reincidente.
+        decision = self.h.decide_from_parts(
+            "turno adverso de nuevo",
+            current_severity=3,
+            semantic_result=(MessageCategory.INAPPROPRIATE, (), 0.92),
+            is_abuse=True,
+            repeat_abuse=True,
+        )
         self.assertTrue(decision.should_close)
+        self.assertIn("recurrence:repeat_abuse", decision.matched_rules)
 
     @patch("app.services.conversation.heuristics.TurnClassifier.classify")
     def test_classifier_fallback_structural(self, mock_classify):

@@ -7,7 +7,7 @@ from app.core.database import Base
 
 class Profile(Base):
     """
-    Perfil de paciente simulado.
+    Perfil de NPC simulado.
 
     Campos JSONB:
       - traits   : identidad del personaje (edad, personalidad, estilo comunicativo, identity_name).

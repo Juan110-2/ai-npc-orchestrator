@@ -20,7 +20,7 @@ class ConversationMessage(Base):
     severity = Column(Float, nullable=False)
     risk_flags = Column(JSONB, nullable=False, default=list)
 
-    # Metricas de IA - solo se populan en mensajes del paciente (role="patient")
+    # Metricas de IA - solo se populan en mensajes del NPC (role="patient")
     ai_provider = Column(Text, nullable=True)
     ai_model = Column(Text, nullable=True)
     tokens_input = Column(Integer, nullable=True)

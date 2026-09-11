@@ -32,7 +32,7 @@ class StreamInputs:
 
 @dataclass
 class StreamExecutionState:
-    """Estado mutable del procesamiento streaming del mensaje del paciente."""
+    """Estado mutable del procesamiento streaming del mensaje del NPC."""
 
     accumulated: str = ""
     provider: str = "unknown"

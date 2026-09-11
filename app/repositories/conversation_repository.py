@@ -13,7 +13,7 @@ class ConversationRepository:
         content: str,
         severity: int,
         risk_flags: list,
-        # Métricas de IA — solo se envían para mensajes del paciente
+        # Métricas de IA — solo se envían para mensajes del NPC
         ai_provider: str | None = None,
         ai_model: str | None = None,
         tokens_input: int | None = None,
