@@ -154,7 +154,7 @@ def _decode_and_verify_token(token: str) -> dict:
             public_key,
             algorithms=[alg],
             issuer=expected_issuer,
-            options={"verify_aud": False},
+            options={"verify_aud": False, "require_exp": True},
         )
 
     # 2) Compatibilidad temporal con legacy HS256
@@ -164,7 +164,7 @@ def _decode_and_verify_token(token: str) -> dict:
             token,
             secret,
             algorithms=["HS256"],
-            options={"verify_aud": False},
+            options={"verify_aud": False, "require_exp": True},
         )
 
     raise HTTPException(

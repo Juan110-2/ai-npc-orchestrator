@@ -38,7 +38,7 @@ if not SUPABASE_JWT_SECRET and not ALLOW_UNSECURE_MOCK_AUTH:
 
 SUPABASE_URL: str | None = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY: str | None = os.getenv("SUPABASE_ANON_KEY")
-SUPABASE_JWT_ISSUER: str | None = os.getenv("SUPABASE_JWT_ISSUER")
+SUPABASE_JWT_ISSUER: str | None = (os.getenv("SUPABASE_JWT_ISSUER") or "").rstrip("/") or None
 if not SUPABASE_JWT_ISSUER and SUPABASE_URL:
     SUPABASE_JWT_ISSUER = f"{SUPABASE_URL.rstrip('/')}/auth/v1"
 
