@@ -245,6 +245,26 @@ class TestSessionAccessControl(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(mock_paginated.call_args.args[1], {"sub": str(user_id)})
 
+    @patch("app.api.v1.routes.sessions.auto_close_stale_sessions")
+    @patch("app.api.v1.routes.sessions._last_model_map", return_value={})
+    @patch("app.api.v1.routes.sessions._list_all_sessions", return_value=(0, []))
+    @patch("app.api.v1.routes.sessions._list_user_sessions", return_value=(0, []))
+    def test_list_sessions_scope_depends_on_role(self, mock_own, mock_all, _models, _stale):
+        cases = [("student", False), ("teacher", False), ("admin", True), (None, False)]
+        for role, sees_all in cases:
+            with self.subTest(role=role):
+                mock_own.reset_mock()
+                mock_all.reset_mock()
+                if role is None:
+                    # Usuario autenticado sin perfil: solo sus sesiones.
+                    override_auth(uuid4())
+                else:
+                    self._login_as(role)
+                response = self.client.get("/sessions/")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(mock_all.called, sees_all)
+                self.assertEqual(mock_own.called, not sees_all)
+
     @patch("app.api.v1.routes.sessions.SessionRepository.start")
     @patch("app.api.v1.routes.sessions.ScenarioRepository.get_by_id")
     @patch("app.api.v1.routes.sessions.ProfileRepository.get_by_id")

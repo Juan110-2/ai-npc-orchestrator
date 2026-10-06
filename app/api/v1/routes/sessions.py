@@ -138,7 +138,11 @@ def _paginated_sessions(
     """Retorna `(total, items)` respetando rol y filtro de vista."""
     user_id, user = _resolve_session_actor(db, payload)
 
-    if not user or user.role in ("admin", "superadmin"):
+    # Un usuario autenticado sin perfil se trata como estudiante: solo ve lo suyo.
+    if not user:
+        return _list_user_sessions(db, user_id, limit, offset, status_filter)
+
+    if user.role in ("admin", "superadmin"):
         if view == "mine":
             return _list_user_sessions(db, user_id, limit, offset, status_filter)
         if view == "assigned":
