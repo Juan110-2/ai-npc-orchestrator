@@ -5,67 +5,23 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, resolve_authenticated_user
-from app.core.config import SUPABASE_JWT_SECRET
+from app.api.v1.deps import STAFF_ROLES, get_db, get_subject_id, get_user_role, require_staff
+from app.core.auth import verify_supabase_jwt
 from app.models.user_profile import UserProfile
 from app.repositories.evaluations_repository import EvaluationsRepository, RubricsRepository
 from app.repositories.sessions_repository import SessionRepository
 from app.services.evaluation.service import compute_overall_score, run_auto_evaluation
 
-router = APIRouter(prefix="/evaluation", tags=["evaluation"])
+router = APIRouter(
+    prefix="/evaluation",
+    tags=["evaluation"],
+    dependencies=[Depends(verify_supabase_jwt)],
+)
 logger = logging.getLogger(__name__)
-
-_security = HTTPBearer(auto_error=False)
-
-
-def _get_current_user(
-    db: Session,
-    credentials: Optional[HTTPAuthorizationCredentials],
-) -> Optional[UserProfile]:
-    return resolve_authenticated_user(
-        db=db,
-        credentials=credentials,
-        allow_missing_credentials=True,
-    )
-
-
-def _require_staff_or_dev(
-    db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
-) -> Optional[UserProfile]:
-    if not SUPABASE_JWT_SECRET:
-        return None
-    user = _get_current_user(db, credentials)
-    if not user or user.role not in ("teacher", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo teachers y admins pueden ejecutar esta operacion",
-        )
-    return user
-
-
-def _authorize_evaluation_read(
-    *,
-    db: Session,
-    credentials: HTTPAuthorizationCredentials | None,
-    evaluation,
-    session,
-) -> None:
-    if not SUPABASE_JWT_SECRET:
-        return
-
-    user = _get_current_user(db, credentials)
-    owner_id = evaluation.student_id if evaluation is not None else getattr(session, "user_id", None)
-    if user.role not in ("teacher", "admin") and owner_id != user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Solo el dueno de la sesion o staff puede ver esta evaluacion",
-        )
 
 
 class TeacherEvaluationInput(BaseModel):
@@ -238,10 +194,13 @@ def _serialize_evaluation(db: Session, ev) -> EvaluationResponse:
     summary="Obtener rúbrica vigente",
     description=(
         "Devuelve la definición de la rúbrica de evaluación activa. "
-        "Es un endpoint público y el frontend lo usa para renderizar formularios y resultados."
+        "Requiere un JWT válido (cualquier rol); el frontend lo usa para renderizar formularios y resultados."
     ),
     response_description="Rúbrica activa con criterios y pesos.",
-    responses={404: {"description": "No hay rúbrica activa configurada"}},
+    responses={
+        401: {"description": "Token no enviado o inválido"},
+        404: {"description": "No hay rúbrica activa configurada"},
+    },
 )
 def get_active_rubric(db: Session = Depends(get_db)):
     rubric = RubricsRepository.get_active(db)
@@ -263,15 +222,20 @@ def get_active_rubric(db: Session = Depends(get_db)):
     summary="Recalcular métricas automáticas",
     description=(
         "Recalcula las métricas automáticas de una sesión y las persiste en `session_evaluations`. "
-        "Puede ejecutarse varias veces sin efectos secundarios funcionales."
+        "Puede ejecutarse varias veces sin efectos secundarios funcionales.\n\n"
+        "Requiere rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Evaluación actualizada con métricas automáticas recalculadas.",
-    responses={404: {"description": "Sesión no encontrada"}},
+    responses={
+        401: {"description": "Token no enviado o inválido"},
+        403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"},
+        404: {"description": "Sesión no encontrada"},
+    },
 )
 def run_auto(
     session_id: UUID,
     db: Session = Depends(get_db),
-    _: Optional[UserProfile] = Depends(_require_staff_or_dev),
+    _: UserProfile = Depends(require_staff),
 ):
     ev = run_auto_evaluation(db, session_id)
     if not ev:
@@ -285,19 +249,20 @@ def run_auto(
     summary="Obtener evaluación de sesión",
     description=(
         "Devuelve la evaluación completa de una sesión. "
-        "Si aún no existe, puede generarse automáticamente con métricas base."
+        "Si aún no existe, puede generarse automáticamente con métricas base.\n\n"
+        "Solo el dueño de la sesión o `teacher`, `admin` y `superadmin`."
     ),
     response_description="Evaluación de la sesión con métricas automáticas y scores de rúbrica.",
     responses={
-        401: {"description": "Auth requerida en modo productivo"},
-        403: {"description": "El estudiante no es dueño de la sesión"},
+        401: {"description": "Token no enviado o inválido"},
+        403: {"description": "El usuario no es dueño de la sesión ni staff"},
         404: {"description": "Sesión no encontrada"},
     },
 )
 def get_evaluation(
     session_id: UUID,
     db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+    payload: dict = Depends(verify_supabase_jwt),
 ):
     ev = EvaluationsRepository.get_by_session(db, session_id)
     session = SessionRepository.get_by_id(db, session_id)
@@ -305,12 +270,13 @@ def get_evaluation(
     if ev is None and session is None:
         raise HTTPException(status_code=404, detail="Sesion no encontrada")
 
-    _authorize_evaluation_read(
-        db=db,
-        credentials=credentials,
-        evaluation=ev,
-        session=session,
-    )
+    user_id = get_subject_id(payload)
+    owner_id = ev.student_id if ev is not None else getattr(session, "user_id", None)
+    if owner_id != user_id and get_user_role(db, user_id) not in STAFF_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo el dueno de la sesion o staff puede ver esta evaluacion",
+        )
 
     if not ev:
         ev = run_auto_evaluation(db, session_id)
@@ -330,12 +296,14 @@ def get_evaluation(
     summary="Enviar evaluación del docente",
     description=(
         "Guarda o actualiza la evaluación del docente sobre una sesión, incluyendo puntajes por criterio "
-        "y retroalimentación textual."
+        "y retroalimentación textual.\n\n"
+        "Requiere rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Evaluación actualizada con scores y feedback del docente.",
     responses={
         400: {"description": "Status inválido"},
-        403: {"description": "Se requiere rol `teacher` o `admin`"},
+        401: {"description": "Token no enviado o inválido"},
+        403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"},
         404: {"description": "La evaluación no existe; ejecutar primero `/auto`"},
     },
 )
@@ -343,21 +311,15 @@ def submit_teacher_evaluation(
     session_id: UUID,
     body: TeacherEvaluationInput,
     db: Session = Depends(get_db),
-    user: Optional[UserProfile] = Depends(_require_staff_or_dev),
+    user: UserProfile = Depends(require_staff),
 ):
     if body.status not in ("draft", "submitted", "reviewed"):
         raise HTTPException(status_code=400, detail="Status invalido")
 
-    evaluator_uuid = user.id if user else None
-    if evaluator_uuid is None:
-        from uuid import UUID as _UUID
-
-        evaluator_uuid = _UUID("00000000-0000-0000-0000-000000000000")
-
     ev = EvaluationsRepository.submit_teacher_evaluation(
         db,
         session_id=session_id,
-        evaluator_id=evaluator_uuid,
+        evaluator_id=user.id,
         scores=body.scores,
         teacher_feedback=body.teacher_feedback,
         status_value=body.status,
@@ -376,9 +338,11 @@ def submit_teacher_evaluation(
     summary="Listar evaluaciones",
     description=(
         "Devuelve la lista de evaluaciones para la vista principal del módulo de evaluación. "
-        "Permite filtrar por una o varias sesiones con `session_ids`."
+        "Permite filtrar por una o varias sesiones con `session_ids`. "
+        "Los estudiantes solo ven sus propias evaluaciones; `teacher`, `admin` y `superadmin` ven todas."
     ),
     response_description="Lista de evaluaciones con datos de sesión y estudiante.",
+    responses={401: {"description": "Token no enviado o inválido"}},
 )
 def list_evaluations(
     session_ids: list[UUID] = Query(
@@ -386,7 +350,7 @@ def list_evaluations(
         description="Filtrar por una o más sesiones específicas.",
     ),
     db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+    payload: dict = Depends(verify_supabase_jwt),
 ):
     from app.models.profile import Profile
     from app.models.session_evaluation import SessionEvaluation
@@ -394,7 +358,7 @@ def list_evaluations(
     from sqlalchemy import desc
     from sqlalchemy.orm import aliased
 
-    user = _get_current_user(db, credentials) if SUPABASE_JWT_SECRET else None
+    user_id = get_subject_id(payload)
 
     StudentProfile = aliased(UserProfile)
     AssignedByProfile = aliased(UserProfile)
@@ -408,8 +372,8 @@ def list_evaluations(
         .order_by(desc(SessionEvaluation.created_at))
     )
 
-    if SUPABASE_JWT_SECRET and user is not None and user.role == "student":
-        q = q.filter(SessionEvaluation.student_id == user.id)
+    if get_user_role(db, user_id) not in STAFF_ROLES:
+        q = q.filter(SessionEvaluation.student_id == user_id)
 
     if session_ids:
         q = q.filter(SessionEvaluation.session_id.in_(session_ids))
@@ -446,24 +410,21 @@ def list_evaluations(
     ),
     response_description="Lista de evaluaciones del estudiante con métricas y feedback.",
     responses={
-        401: {"description": "Auth requerida en modo productivo"},
+        401: {"description": "Token no enviado o inválido"},
         403: {"description": "El estudiante consulta el historial de otro usuario"},
     },
 )
 def list_student_evaluations(
     student_id: UUID,
     db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+    payload: dict = Depends(verify_supabase_jwt),
 ):
-    if SUPABASE_JWT_SECRET:
-        user = _get_current_user(db, credentials)
-        if user is None:
-            raise HTTPException(status_code=401, detail="Auth requerida")
-        if user.role not in ("teacher", "admin") and user.id != student_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Solo puedes ver tus propias evaluaciones",
-            )
+    user_id = get_subject_id(payload)
+    if user_id != student_id and get_user_role(db, user_id) not in STAFF_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo puedes ver tus propias evaluaciones",
+        )
 
     evs = EvaluationsRepository.list_by_student(db, student_id)
     return [

@@ -4,7 +4,6 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.auth import verify_supabase_jwt, verify_supabase_token
-from app.core.config import SUPABASE_JWT_SECRET
 from app.core.database import SessionLocal
 from app.models.user_profile import UserProfile
 from app.repositories.sessions_repository import SessionRepository
@@ -22,40 +21,18 @@ def get_db():
         db.close()
 
 
-async def optional_jwt(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-) -> dict | None:
-    """
-    Extrae y valida el JWT si está presente en el header Authorization.
-    Retorna None si no hay token (modo dev sin auth).
-    """
-    if credentials is None:
-        return None
-    try:
-        return verify_supabase_token(credentials.credentials)
-    except HTTPException:
-        raise
-
-
 def resolve_authenticated_user(
     *,
     db,
     credentials: HTTPAuthorizationCredentials | None,
-    allow_missing_credentials: bool = True,
-) -> UserProfile | None:
+) -> UserProfile:
     """
     Resuelve el usuario autenticado de forma consistente.
 
-    - Si auth está desactivada, retorna None.
-    - Si no hay credenciales y están permitidas, retorna None.
-    - Si el token es inválido o no existe el perfil local, lanza 401.
+    Sin credenciales, con token inválido, sin `sub` válido o sin perfil local
+    lanza 401; nunca retorna None.
     """
-    if not SUPABASE_JWT_SECRET:
-        return None
-
     if credentials is None:
-        if allow_missing_credentials:
-            return None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header requerido",
@@ -63,15 +40,9 @@ def resolve_authenticated_user(
         )
 
     payload = verify_supabase_token(credentials.credentials)
-    user_id_str = payload.get("sub")
-    if not user_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token sin subject valido",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    user_id = get_subject_id(payload)
 
-    user = UsersRepository.get_by_id(db, UUID(user_id_str))
+    user = UsersRepository.get_by_id(db, user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -129,3 +100,22 @@ def require_session_access(
             detail="No tienes acceso a esta sesión",
         )
     return session
+
+
+def require_staff(
+    db=Depends(get_db),
+    payload: dict = Depends(verify_supabase_jwt),
+) -> UserProfile:
+    """
+    Exige JWT válido y rol `teacher`, `admin` o `superadmin`.
+
+    Sin token o sin `sub` válido -> 401; sin perfil local o con otro rol -> 403.
+    Retorna el perfil del usuario para reutilizarlo en la ruta.
+    """
+    user = UsersRepository.get_by_id(db, get_subject_id(payload))
+    if user is None or user.role not in STAFF_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Se requiere rol teacher, admin o superadmin",
+        )
+    return user

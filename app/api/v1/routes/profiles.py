@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db
+from app.api.v1.deps import get_db, require_staff
+from app.core.auth import verify_supabase_jwt
 from app.repositories.profile_repository import ProfileRepository
 from app.schemas.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
+_401 = {401: {"description": "Token no enviado o inválido"}}
+_403 = {403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"}}
 _404 = {404: {"description": "Perfil no encontrado"}}
 
 
@@ -22,6 +25,8 @@ _404 = {404: {"description": "Perfil no encontrado"}}
         "(`behavior_min` / `behavior_max`)."
     ),
     response_description="Perfil creado con UUID y timestamps.",
+    responses={**_401, **_403},
+    dependencies=[Depends(require_staff)],
 )
 def create_profile(
     payload: ProfileCreate,
@@ -36,6 +41,8 @@ def create_profile(
     summary="Listar perfiles",
     description="Devuelve todos los perfiles de personajes simulados registrados en el sistema.",
     response_description="Lista de perfiles ordenada por fecha de creación.",
+    responses=_401,
+    dependencies=[Depends(verify_supabase_jwt)],
 )
 def get_profiles(
     db: Session = Depends(get_db),
@@ -49,7 +56,8 @@ def get_profiles(
     summary="Obtener perfil por ID",
     description="Devuelve el detalle completo de un perfil de personaje simulado.",
     response_description="Perfil encontrado.",
-    responses=_404,
+    responses={**_401, **_404},
+    dependencies=[Depends(verify_supabase_jwt)],
 )
 def get_profile(
     profile_id: str,
@@ -71,7 +79,8 @@ def get_profile(
         "Nota: `traits` y `behavior` se reemplazan por completo si se envían."
     ),
     response_description="Perfil actualizado.",
-    responses=_404,
+    responses={**_401, **_403, **_404},
+    dependencies=[Depends(require_staff)],
 )
 def update_profile(
     profile_id: str,
@@ -90,7 +99,8 @@ def update_profile(
         "Esta operación no se puede deshacer. "
         "Si el perfil está vinculado a sesiones activas, la eliminación puede fallar."
     ),
-    responses=_404,
+    responses={**_401, **_403, **_404},
+    dependencies=[Depends(require_staff)],
 )
 def delete_profile(
     profile_id: str,

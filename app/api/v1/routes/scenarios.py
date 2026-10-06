@@ -3,12 +3,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db
+from app.api.v1.deps import get_db, require_staff
+from app.core.auth import verify_supabase_jwt
 from app.repositories.scenario_repository import ScenarioRepository
 from app.schemas.scenario import ScenarioCreate, ScenarioResponse, ScenarioUpdate
 
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
+_401 = {401: {"description": "Token no enviado o inválido"}}
+_403 = {403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"}}
 _404 = {404: {"description": "Escenario no encontrado"}}
 
 
@@ -24,6 +27,8 @@ _404 = {404: {"description": "Escenario no encontrado"}}
         "de comportamiento."
     ),
     response_description="Escenario creado con UUID y timestamp.",
+    responses={**_401, **_403},
+    dependencies=[Depends(require_staff)],
 )
 def create_scenario(
     payload: ScenarioCreate,
@@ -38,6 +43,8 @@ def create_scenario(
     summary="Listar escenarios",
     description="Devuelve todos los escenarios de simulación registrados en el sistema.",
     response_description="Lista de escenarios.",
+    responses=_401,
+    dependencies=[Depends(verify_supabase_jwt)],
 )
 def list_scenarios(
     db: Session = Depends(get_db),
@@ -51,7 +58,8 @@ def list_scenarios(
     summary="Obtener escenario por ID",
     description="Devuelve el detalle completo de un escenario de simulación.",
     response_description="Escenario encontrado.",
-    responses=_404,
+    responses={**_401, **_404},
+    dependencies=[Depends(verify_supabase_jwt)],
 )
 def get_scenario(
     scenario_id: UUID,
@@ -73,7 +81,8 @@ def get_scenario(
         "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían."
     ),
     response_description="Escenario actualizado.",
-    responses=_404,
+    responses={**_401, **_403, **_404},
+    dependencies=[Depends(require_staff)],
 )
 def update_scenario(
     scenario_id: UUID,
@@ -94,7 +103,8 @@ def update_scenario(
         "Elimina permanentemente un escenario de simulación. "
         "Esta operación no se puede deshacer."
     ),
-    responses=_404,
+    responses={**_401, **_403, **_404},
+    dependencies=[Depends(require_staff)],
 )
 def delete_scenario(
     scenario_id: UUID,

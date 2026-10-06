@@ -113,17 +113,24 @@ def _decode_and_verify_token(token: str) -> dict:
 
     # 1) Tokens asimetricos modernos: ES256 / RS256 / etc.
     if alg in ASYMMETRIC_ALGS:
-        expected_issuer = SUPABASE_JWT_ISSUER or issuer
-        jwks_url = SUPABASE_JWKS_URL or (
-            f"{issuer.rstrip('/')}/.well-known/jwks.json" if issuer else None
-        )
-
+        # El issuer y el JWKS salen siempre de la configuración del servidor:
+        # tomarlos del propio token permitiría firmarlo con una clave del atacante.
+        expected_issuer = SUPABASE_JWT_ISSUER
         if not expected_issuer:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Issuer no disponible",
+                detail="Issuer no configurado en el servidor",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        if issuer != expected_issuer:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Issuer del token no coincide",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        jwks_url = SUPABASE_JWKS_URL or f"{expected_issuer.rstrip('/')}/.well-known/jwks.json"
 
         if not jwks_url or not kid:
             raise HTTPException(

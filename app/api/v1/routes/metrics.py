@@ -11,7 +11,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, resolve_authenticated_user
-from app.core.config import SUPABASE_JWT_SECRET
 from app.models.ai_call_log import AICallLog
 from app.models.user_profile import UserProfile
 
@@ -204,28 +203,8 @@ class MetricsSummaryResponse(BaseModel):
 def _require_admin(
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
-) -> Optional[UserProfile]:
-    if not SUPABASE_JWT_SECRET:
-        return None
-
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization Bearer requerido",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = resolve_authenticated_user(
-        db=db,
-        credentials=credentials,
-        allow_missing_credentials=False,
-    )
-    if user is None:
-        logger.warning("[metrics] Se esperaba usuario autenticado pero no se resolvió perfil")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuario autenticado sin perfil asociado",
-        )
+) -> UserProfile:
+    user = resolve_authenticated_user(db=db, credentials=credentials)
 
     if user.role != "admin":
         raise HTTPException(
