@@ -95,7 +95,10 @@ def update_profile(
     payload: ProfileUpdate,
     db: Session = Depends(get_db),
 ):
-    return ProfileRepository.update(db, profile_id, payload)
+    profile = ProfileRepository.update(db, profile_id, payload)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
 
 
 @router.delete(
