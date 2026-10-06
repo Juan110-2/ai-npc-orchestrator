@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, optional_jwt
+from app.api.v1.deps import STAFF_ROLES, get_db, get_user_role, require_session_access
+from app.core.auth import verify_supabase_jwt
 from app.models.ai_call_log import AICallLog
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.scenario_repository import ScenarioRepository
@@ -122,20 +123,19 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 _404 = {404: {"description": "Sesión no encontrada"}}
 _400 = {400: {"description": "Solicitud inválida, por ejemplo una sesión ya cerrada"}}
+_401 = {401: {"description": "Token ausente o inválido"}}
+_403 = {403: {"description": "La sesión pertenece a otro usuario"}}
 
 
 def _paginated_sessions(
     db: Session,
-    payload: dict | None,
+    payload: dict,
     view: str | None,
     status_filter: str | None,
     limit: int,
     offset: int,
 ) -> tuple[int, list]:
     """Retorna `(total, items)` respetando rol y filtro de vista."""
-    if payload is None:
-        return _list_all_sessions(db, limit, offset, status_filter)
-
     user_id, user = _resolve_session_actor(db, payload)
 
     if not user or user.role in ("admin", "superadmin"):
@@ -153,8 +153,8 @@ def _paginated_sessions(
     return _list_user_sessions(db, user_id, limit, offset, status_filter)
 
 
-def _resolve_start_session_actor(payload: dict | None) -> UUID | None:
-    return UUID(payload["sub"]) if payload else None
+def _resolve_start_session_actor(payload: dict) -> UUID:
+    return UUID(payload["sub"])
 
 
 def _apply_manual_session_close(session, closing_kind: str | None) -> None:
@@ -218,12 +218,14 @@ class EndSessionResponse(BaseModel):
     summary="Listar sesiones",
     description=(
         "Devuelve sesiones paginadas con filtrado por rol:\n\n"
-        "- Sin auth o `admin`: todas las sesiones.\n"
+        "- `admin` o `superadmin`: todas las sesiones.\n"
         "- `teacher`: por defecto sus propias sesiones; `view=assigned` devuelve sesiones asignadas a otros usuarios.\n"
         "- `student`: siempre solo sus propias sesiones.\n\n"
-        "El parámetro `status` filtra por estado: `active`, `completed` o `terminated`."
+        "El parámetro `status` filtra por estado: `active`, `completed` o `terminated`.\n\n"
+        "Requiere JWT."
     ),
     response_description="Página de sesiones con metadatos de paginación.",
+    responses=_401,
 )
 def list_sessions(
     page: int = Query(1, ge=1, description="Número de página, base 1."),
@@ -235,7 +237,7 @@ def list_sessions(
         description="Filtro por estado: `active`, `completed` o `terminated`.",
     ),
     db: Session = Depends(get_db),
-    payload: dict | None = Depends(optional_jwt),
+    payload: dict = Depends(verify_supabase_jwt),
 ):
     # No hay cron en este proyecto: se cierran perezosamente acá las sesiones
     # "active" abandonadas (pestaña cerrada sin terminar la conversación) para
@@ -262,23 +264,34 @@ def list_sessions(
         "Crea e inicia una nueva sesión vinculando un perfil de personaje simulado con un escenario. "
         "La severidad inicial se toma directamente del escenario.\n\n"
         "Si existe JWT, `user_id` y `assigned_by` pueden omitirse y se infieren automáticamente "
-        "desde el token."
+        "desde el token.\n\n"
+        "Requiere JWT. Un `student` solo puede crear sesiones para sí mismo; `teacher`, `admin` y "
+        "`superadmin` pueden asignarlas a otro usuario."
     ),
     response_description="Sesión creada en estado `active`.",
-    responses={404: {"description": "Perfil o escenario no encontrado"}},
+    responses={
+        **_401,
+        403: {"description": "Un estudiante intentó crear una sesión para otro usuario"},
+        404: {"description": "Perfil o escenario no encontrado"},
+    },
 )
 def start_session(
     payload_data: SessionCreate,
     db: Session = Depends(get_db),
-    payload: dict | None = Depends(optional_jwt),
+    payload: dict = Depends(verify_supabase_jwt),
 ):
+    caller_id = _resolve_start_session_actor(payload)
+    if get_user_role(db, caller_id) not in STAFF_ROLES:
+        for target in (payload_data.user_id, payload_data.assigned_by):
+            if target is not None and target != caller_id:
+                raise HTTPException(status_code=403, detail="Solo puedes crear sesiones para ti mismo")
+
     profile = ProfileRepository.get_by_id(db, payload_data.profile_id)
     scenario = ScenarioRepository.get_by_id(db, payload_data.scenario_id)
 
     if not profile or not scenario:
         raise HTTPException(status_code=404, detail="Profile or Scenario not found")
 
-    caller_id = _resolve_start_session_actor(payload)
     assigned_by = payload_data.assigned_by or caller_id
     user_id = payload_data.user_id or caller_id
 
@@ -296,17 +309,14 @@ def start_session(
     "/{session_id}",
     response_model=SessionResponse,
     summary="Obtener sesión por ID",
-    description="Devuelve el detalle completo de una sesión, incluyendo severidad actual y tiempo acumulado.",
+    description=(
+        "Devuelve el detalle completo de una sesión, incluyendo severidad actual y tiempo acumulado. "
+        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
+    ),
     response_description="Sesión encontrada.",
-    responses=_404,
+    responses={**_401, **_403, **_404},
 )
-def get_session(
-    session_id: UUID,
-    db: Session = Depends(get_db),
-):
-    session = SessionRepository.get_by_id(db, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+def get_session(session=Depends(require_session_access)):
     return session
 
 
@@ -321,7 +331,7 @@ def get_session(
         "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
-    responses=_404,
+    responses={**_401, **_403, **_404},
 )
 @router.post(
     "/{session_id}/time",
@@ -332,13 +342,14 @@ def get_session(
         "como `navigator.sendBeacon`."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
-    responses=_404,
+    responses={**_401, **_403, **_404},
     include_in_schema=False,
 )
 def flush_time(
     session_id: UUID,
     body: TimeFlushBody,
     db: Session = Depends(get_db),
+    _session=Depends(require_session_access),
 ):
     session = SessionRepository.add_time_delta(db, session_id, body.delta_seconds)
     if not session:
@@ -359,17 +370,14 @@ def flush_time(
         "- `inappropriate` -> `terminated`"
     ),
     response_description="Confirmación de cierre con estado final.",
-    responses={**_404, **_400},
+    responses={**_401, **_403, **_404, **_400},
 )
 def end_session(
     session_id: UUID,
     body: EndSessionBody = Body(default=EndSessionBody()),
     db: Session = Depends(get_db),
+    session=Depends(require_session_access),
 ):
-    session = SessionRepository.get_by_id(db, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
     if session.ended_at:
         raise HTTPException(status_code=400, detail="Session already ended")
 

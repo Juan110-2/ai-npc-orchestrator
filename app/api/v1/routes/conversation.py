@@ -1,13 +1,12 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db
+from app.api.v1.deps import get_db, require_session_access
 from app.core.limiter import limiter
 from app.repositories.conversation_repository import ConversationRepository
-from app.repositories.sessions_repository import SessionRepository
 from app.schemas.conversation_message import ConversationInput, ConversationMessageResponse
 from app.services.conversation import (
     build_stream_inputs,
@@ -42,10 +41,13 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         "5. Genera la respuesta del NPC via el proveedor de IA activo.\n"
         "6. Persiste el mensaje del NPC (`role=patient`) con severidad, flags y metricas de IA.\n"
         "7. Si la sesion debe cerrarse, la finaliza y dispara la evaluacion automatica.\n\n"
-        "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE)."
+        "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE).\n\n"
+        "Requiere JWT; solo el dueno de la sesion o `teacher`, `admin` y `superadmin` pueden escribir turnos."
     ),
     response_description="Mensaje del personaje simulado (NPC) con severidad y metricas de IA.",
     responses={
+        401: {"description": "Token ausente o invalido"},
+        403: {"description": "La sesion pertenece a otro usuario"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
     },
@@ -56,6 +58,7 @@ def converse(
     session_id: UUID,
     payload: ConversationInput,
     db: Session = Depends(get_db),
+    _session=Depends(require_session_access),
 ):
     session, profile, scenario = resolve_session_context(session_id, db)
     user_input = validate_user_input(payload.content)
@@ -100,10 +103,13 @@ def converse(
         "| `done` | `{\"done\": true, \"severity\": 2.7, \"should_close\": false, "
         "\"closing_kind\": null, \"metrics\": {...}}` | Fin del stream con metricas |\n"
         "| `error` | `{\"error\": \"mensaje\"}` | Error durante la generacion |\n\n"
-        "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono."
+        "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono.\n\n"
+        "Requiere JWT; solo el dueno de la sesion o `teacher`, `admin` y `superadmin` pueden escribir turnos."
     ),
     response_description="Stream SSE (`text/event-stream`) con chunks de texto y evento `done` final.",
     responses={
+        401: {"description": "Token ausente o invalido"},
+        403: {"description": "La sesion pertenece a otro usuario"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
     },
@@ -114,6 +120,7 @@ def converse_stream(
     session_id: UUID,
     payload: ConversationInput,
     db: Session = Depends(get_db),
+    _session=Depends(require_session_access),
 ):
     session, profile, scenario = resolve_session_context(session_id, db)
     user_input = validate_user_input(payload.content)
@@ -140,16 +147,19 @@ def converse_stream(
     description=(
         "Devuelve la transcripcion completa de una sesion, ordenada cronologicamente. "
         "Incluye todos los mensajes del usuario (`role=trainee`) y del personaje simulado "
-        "(`role=patient`), con su severidad registrada, flags conductuales y metricas de IA."
+        "(`role=patient`), con su severidad registrada, flags conductuales y metricas de IA. "
+        "Requiere ser el dueno de la sesion o tener rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Lista completa de mensajes de la sesion en orden cronologico.",
-    responses={404: {"description": "Sesion no encontrada"}},
+    responses={
+        401: {"description": "Token ausente o invalido"},
+        403: {"description": "La sesion pertenece a otro usuario"},
+        404: {"description": "Sesion no encontrada"},
+    },
 )
 def get_conversation_history(
     session_id: UUID,
     db: Session = Depends(get_db),
+    _session=Depends(require_session_access),
 ):
-    session = SessionRepository.get_by_id(db, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
     return ConversationRepository.list_by_session(db, session_id)

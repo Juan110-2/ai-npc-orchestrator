@@ -3,10 +3,11 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.auth import verify_supabase_token
+from app.core.auth import verify_supabase_jwt, verify_supabase_token
 from app.core.config import SUPABASE_JWT_SECRET
 from app.core.database import SessionLocal
 from app.models.user_profile import UserProfile
+from app.repositories.sessions_repository import SessionRepository
 from app.repositories.users_repository import UsersRepository
 
 _bearer = HTTPBearer(auto_error=False)
@@ -79,3 +80,40 @@ def resolve_authenticated_user(
         )
 
     return user
+
+
+STAFF_ROLES = ("teacher", "admin", "superadmin")
+
+
+def get_user_role(db, user_id: UUID) -> str:
+    """Rol del usuario autenticado; sin perfil en `user_profiles` se trata como `student`."""
+    user = UsersRepository.get_by_id(db, user_id)
+    return user.role if user else "student"
+
+
+def require_session_access(
+    session_id: UUID,
+    db=Depends(get_db),
+    payload: dict = Depends(verify_supabase_jwt),
+):
+    """
+    Exige JWT válido y autoriza el acceso a una sesión concreta.
+
+    Se permite al dueño de la sesión o a `teacher`, `admin` y `superadmin`.
+    Sesión inexistente -> 404; cualquier otro caso -> 403.
+    Retorna la sesión para reutilizarla en la ruta.
+    """
+    session = SessionRepository.get_by_id(db, session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    user_id = UUID(payload["sub"])
+    if session.user_id is not None and session.user_id == user_id:
+        return session
+
+    if get_user_role(db, user_id) not in STAFF_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a esta sesión",
+        )
+    return session

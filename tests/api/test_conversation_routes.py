@@ -8,6 +8,8 @@ from tests.api.test_utils import (
     clear_overrides,
     make_message,
     make_session,
+    override_auth,
+    override_session_access,
 )
 
 
@@ -48,6 +50,7 @@ class TestConversationRoutes(unittest.TestCase):
             latency_ms=15.0,
         )
 
+        override_session_access(session)
         mock_resolve.return_value = (session, profile, scenario)
         mock_process_turn.return_value = SimpleNamespace()
         mock_generate.return_value = ai_response
@@ -66,6 +69,7 @@ class TestConversationRoutes(unittest.TestCase):
     @patch("app.api.v1.routes.conversation.resolve_session_context")
     def test_converse_rejects_blank_content(self, mock_resolve):
         session = make_session()
+        override_session_access(session)
         mock_resolve.return_value = (session, SimpleNamespace(), SimpleNamespace())
 
         response = self.client.post(
@@ -77,11 +81,10 @@ class TestConversationRoutes(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "Missing content")
 
     @patch("app.api.v1.routes.conversation.ConversationRepository.list_by_session")
-    @patch("app.api.v1.routes.conversation.SessionRepository.get_by_id")
-    def test_get_history_returns_messages(self, mock_get_session, mock_list):
+    def test_get_history_returns_messages(self, mock_list):
         session = make_session()
+        override_session_access(session)
         message = make_message(session_id=session.id)
-        mock_get_session.return_value = session
         mock_list.return_value = [message]
 
         response = self.client.get(f"/conversation/{session.id}/history")
@@ -90,8 +93,9 @@ class TestConversationRoutes(unittest.TestCase):
         self.assertEqual(len(response.json()), 1)
         self.assertEqual(response.json()[0]["content"], message.content)
 
-    @patch("app.api.v1.routes.conversation.SessionRepository.get_by_id")
+    @patch("app.api.v1.deps.SessionRepository.get_by_id")
     def test_get_history_returns_404_when_session_is_missing(self, mock_get_session):
+        override_auth()
         mock_get_session.return_value = None
 
         response = self.client.get(f"/conversation/{uuid4()}/history")

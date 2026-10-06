@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.services.conversation.models import StreamInputs, TurnContext
-from tests.api.test_utils import build_client, clear_overrides, make_session
+from tests.api.test_utils import build_client, clear_overrides, make_session, override_session_access
 
 
 class _ResponseMode:
@@ -57,6 +57,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         mock_finalize,
     ):
         session = make_session()
+        override_session_access(session)
         mock_resolve.return_value = (session, SimpleNamespace(), SimpleNamespace())
         mock_process_turn.return_value = _make_ctx(should_close=True, closing_kind="resolution")
         mock_build_stream_inputs.return_value = StreamInputs(
@@ -101,6 +102,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         mock_handle_error,
     ):
         session = make_session()
+        override_session_access(session)
         mock_resolve.return_value = (session, SimpleNamespace(), SimpleNamespace())
         mock_process_turn.return_value = _make_ctx()
         mock_build_stream_inputs.return_value = StreamInputs(
@@ -147,6 +149,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         mock_finalize,
     ):
         session = make_session()
+        override_session_access(session)
         mock_resolve.return_value = (session, SimpleNamespace(), SimpleNamespace())
         mock_process_turn.return_value = _make_ctx()
         mock_build_stream_inputs.return_value = StreamInputs(

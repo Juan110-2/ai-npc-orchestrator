@@ -75,6 +75,21 @@ def make_evaluation(**overrides):
     return SimpleNamespace(**data)
 
 
+def override_auth(user_id=None):
+    """Simula un JWT válido (`verify_supabase_jwt`) para el usuario indicado."""
+    from app.core.auth import verify_supabase_jwt
+
+    sub = str(user_id or uuid4())
+    app.dependency_overrides[verify_supabase_jwt] = lambda: {"sub": sub}
+
+
+def override_session_access(session):
+    """Omite la autorización por sesión, para probar solo la lógica de la ruta."""
+    from app.api.v1.deps import require_session_access
+
+    app.dependency_overrides[require_session_access] = lambda: session
+
+
 def make_message(**overrides):
     now = datetime.now(timezone.utc)
     data = {
