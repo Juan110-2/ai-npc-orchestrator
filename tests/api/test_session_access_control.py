@@ -279,9 +279,10 @@ class TestSessionAccessControl(unittest.TestCase):
     @patch("app.api.v1.routes.sessions.SessionRepository.start")
     @patch("app.api.v1.routes.sessions.ScenarioRepository.get_by_id")
     @patch("app.api.v1.routes.sessions.ProfileRepository.get_by_id")
-    def test_start_session_student_cannot_assign_to_other_user(self, mock_profile, mock_scenario, mock_start):
-        self._login_as("student")
-        for extra in ({"user_id": str(self.other_id)}, {"assigned_by": str(self.other_id)}):
+    def test_start_session_student_cannot_create_sessions(self, mock_profile, mock_scenario, mock_start):
+        student_id = self._login_as("student")
+        # Ni para sí mismo ni para otro: el estudiante solo realiza las sesiones asignadas.
+        for extra in ({}, {"user_id": str(student_id)}, {"user_id": str(self.other_id)}, {"assigned_by": str(self.other_id)}):
             with self.subTest(extra=extra):
                 response = self.client.post(
                     "/sessions/start",
@@ -289,20 +290,34 @@ class TestSessionAccessControl(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 403)
         mock_start.assert_not_called()
+        mock_profile.assert_not_called()
 
     @patch("app.api.v1.routes.sessions.SessionRepository.start")
     @patch("app.api.v1.routes.sessions.ScenarioRepository.get_by_id")
     @patch("app.api.v1.routes.sessions.ProfileRepository.get_by_id")
-    def test_start_session_student_can_create_for_self(self, mock_profile, mock_scenario, mock_start):
-        user_id = self._login_as("student")
-        mock_profile.return_value = MagicMock(id=uuid4())
-        mock_start.return_value = make_session(user_id=user_id)
+    def test_start_session_user_without_profile_cannot_create_sessions(self, mock_profile, mock_scenario, mock_start):
+        override_auth(uuid4())
         response = self.client.post(
             "/sessions/start",
-            json={"profile_id": str(uuid4()), "scenario_id": str(uuid4()), "user_id": str(user_id)},
+            json={"profile_id": str(uuid4()), "scenario_id": str(uuid4())},
+        )
+        self.assertEqual(response.status_code, 403)
+        mock_start.assert_not_called()
+
+    @patch("app.api.v1.routes.sessions.SessionRepository.start")
+    @patch("app.api.v1.routes.sessions.ScenarioRepository.get_by_id")
+    @patch("app.api.v1.routes.sessions.ProfileRepository.get_by_id")
+    def test_start_session_teacher_defaults_to_self(self, mock_profile, mock_scenario, mock_start):
+        teacher_id = self._login_as("teacher")
+        mock_profile.return_value = MagicMock(id=uuid4())
+        mock_start.return_value = make_session(user_id=teacher_id)
+        response = self.client.post(
+            "/sessions/start",
+            json={"profile_id": str(uuid4()), "scenario_id": str(uuid4())},
         )
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(mock_start.call_args.kwargs["user_id"], user_id)
+        self.assertEqual(mock_start.call_args.kwargs["user_id"], teacher_id)
+        self.assertEqual(mock_start.call_args.kwargs["assigned_by"], teacher_id)
 
     @patch("app.api.v1.routes.sessions.SessionRepository.start")
     @patch("app.api.v1.routes.sessions.ScenarioRepository.get_by_id")

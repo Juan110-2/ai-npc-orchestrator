@@ -45,7 +45,12 @@ class TestSessionRoutes(unittest.TestCase):
         mock_scenario.return_value = scenario
         mock_start.return_value = session
 
-        override_auth(session.user_id)
+        # Solo docente o admin crean sesiones: se simula un docente autenticado.
+        from app.api.v1.deps import require_staff
+        from app.main import app
+        from tests.api.test_utils import make_user
+
+        app.dependency_overrides[require_staff] = lambda: make_user(id=session.user_id, role="teacher")
 
         response = self.client.post(
             "/sessions/start",

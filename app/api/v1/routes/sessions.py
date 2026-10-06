@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import STAFF_ROLES, get_db, get_subject_id, get_user_role, require_session_access
+from app.api.v1.deps import get_db, get_subject_id, require_session_access, require_staff
 from app.core.auth import verify_supabase_jwt
 from app.models.ai_call_log import AICallLog
 from app.repositories.profile_repository import ProfileRepository
@@ -157,10 +157,6 @@ def _paginated_sessions(
     return _list_user_sessions(db, user_id, limit, offset, status_filter)
 
 
-def _resolve_start_session_actor(payload: dict) -> UUID:
-    return get_subject_id(payload)
-
-
 def _apply_manual_session_close(session, closing_kind: str | None) -> None:
     session.ended_at = datetime.now(timezone.utc)
     session.status = "terminated" if closing_kind in ("crisis", "inappropriate") else "completed"
@@ -269,35 +265,29 @@ def list_sessions(
         "La severidad inicial se toma directamente del escenario.\n\n"
         "Si existe JWT, `user_id` y `assigned_by` pueden omitirse y se infieren automáticamente "
         "desde el token.\n\n"
-        "Requiere JWT. Un `student` solo puede crear sesiones para sí mismo; `teacher`, `admin` y "
-        "`superadmin` pueden asignarlas a otro usuario."
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`. Un `student` no crea sesiones: "
+        "solo realiza las que se le asignan (`user_id`)."
     ),
     response_description="Sesión creada en estado `active`.",
     responses={
         **_401,
-        403: {"description": "Un estudiante intentó crear una sesión para otro usuario"},
+        403: {"description": "El usuario no tiene rol para crear sesiones"},
         404: {"description": "Perfil o escenario no encontrado"},
     },
 )
 def start_session(
     payload_data: SessionCreate,
     db: Session = Depends(get_db),
-    payload: dict = Depends(verify_supabase_jwt),
+    caller=Depends(require_staff),
 ):
-    caller_id = _resolve_start_session_actor(payload)
-    if get_user_role(db, caller_id) not in STAFF_ROLES:
-        for target in (payload_data.user_id, payload_data.assigned_by):
-            if target is not None and target != caller_id:
-                raise HTTPException(status_code=403, detail="Solo puedes crear sesiones para ti mismo")
-
     profile = ProfileRepository.get_by_id(db, payload_data.profile_id)
     scenario = ScenarioRepository.get_by_id(db, payload_data.scenario_id)
 
     if not profile or not scenario:
         raise HTTPException(status_code=404, detail="Profile or Scenario not found")
 
-    assigned_by = payload_data.assigned_by or caller_id
-    user_id = payload_data.user_id or caller_id
+    assigned_by = payload_data.assigned_by or caller.id
+    user_id = payload_data.user_id or caller.id
 
     return SessionRepository.start(
         db,
