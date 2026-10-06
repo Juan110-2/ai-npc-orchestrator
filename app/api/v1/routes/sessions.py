@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import STAFF_ROLES, get_db, get_user_role, require_session_access
+from app.api.v1.deps import STAFF_ROLES, get_db, get_subject_id, get_user_role, require_session_access
 from app.core.auth import verify_supabase_jwt
 from app.models.ai_call_log import AICallLog
 from app.repositories.profile_repository import ProfileRepository
@@ -56,7 +56,7 @@ def _run_post_close_hooks(db: Session, session) -> None:
 def _resolve_session_actor(db: Session, payload: dict | None):
     if payload is None:
         return None, None
-    user_id = UUID(payload["sub"])
+    user_id = get_subject_id(payload)
     user = UsersRepository.get_by_id(db, user_id)
     return user_id, user
 
@@ -158,7 +158,7 @@ def _paginated_sessions(
 
 
 def _resolve_start_session_actor(payload: dict) -> UUID:
-    return UUID(payload["sub"])
+    return get_subject_id(payload)
 
 
 def _apply_manual_session_close(session, closing_kind: str | None) -> None:

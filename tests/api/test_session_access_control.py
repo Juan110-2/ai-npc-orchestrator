@@ -235,6 +235,17 @@ class TestSessionAccessControl(unittest.TestCase):
         self.db.add.assert_not_called()
         self.db.commit.assert_not_called()
 
+    def test_token_without_valid_sub_returns_401(self):
+        from app.core.auth import verify_supabase_jwt
+        from app.main import app
+
+        for payload in ({"role": "anon"}, {"sub": "no-es-uuid"}):
+            app.dependency_overrides[verify_supabase_jwt] = lambda payload=payload: payload
+            for method, path, body in self._routes() + [("get", "/sessions/", None)]:
+                with self.subTest(payload=payload, method=method, path=path):
+                    response = self.client.request(method, path, json=body)
+                    self.assertEqual(response.status_code, 401)
+
     # --- listado y start -----------------------------------------------
 
     @patch("app.api.v1.routes.sessions._last_model_map", return_value={})

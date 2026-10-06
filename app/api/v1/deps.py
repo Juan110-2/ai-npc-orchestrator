@@ -91,6 +91,18 @@ def get_user_role(db, user_id: UUID) -> str:
     return user.role if user else "student"
 
 
+def get_subject_id(payload: dict) -> UUID:
+    """UUID del usuario (`sub`) del token; 401 si falta o no es un UUID (p. ej. claves anon/service_role)."""
+    try:
+        return UUID(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token sin usuario valido",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 def require_session_access(
     session_id: UUID,
     db=Depends(get_db),
@@ -103,11 +115,11 @@ def require_session_access(
     Sesión inexistente -> 404; cualquier otro caso -> 403.
     Retorna la sesión para reutilizarla en la ruta.
     """
+    user_id = get_subject_id(payload)
     session = SessionRepository.get_by_id(db, session_id)
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-    user_id = UUID(payload["sub"])
     if session.user_id is not None and session.user_id == user_id:
         return session
 
