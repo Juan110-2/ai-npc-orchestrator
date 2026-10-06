@@ -64,6 +64,40 @@ Todo lo demás requiere un JWT de Supabase en la cabecera:
 El rol (`student`, `teacher`, `admin`) se guarda en el perfil del usuario, no en el token.
 Todo usuario nuevo es `student`; un `admin` cambia el rol con `PATCH /admin/users/{user_id}`.
 
+## Credenciales con Supabase
+
+Las cuentas y los tokens los gestiona Supabase Auth; el orquestador solo los valida.
+Un cliente (web, 3D u otro) puede obtener el token de dos formas:
+
+**1. A través de esta API** (lo más simple, sin instalar nada):
+
+1. Crear la cuenta con `POST /auth/signup`, o pedir al administrador una ya existente.
+2. Si el proyecto exige confirmar el correo, abrir el enlace que llega al email.
+3. `POST /auth/login` devuelve `access_token`, `refresh_token` y `expires_in`.
+4. Enviar `Authorization: Bearer <access_token>` en cada petición.
+
+**2. Con la librería de Supabase en el cliente** (`@supabase/supabase-js`), que además
+renueva el token sola e inicia sesión con Google o enlace por correo:
+
+1. Pedir al administrador del proyecto la **URL del proyecto** y la **clave pública (`anon`)**.
+   Son las únicas credenciales que van en el cliente.
+2. Crear el cliente con esos dos valores e iniciar sesión (`signInWithPassword`, `signInWithOAuth`
+   o `signInWithOtp`).
+3. Leer `session.access_token` y enviarlo como `Bearer` en cada petición a esta API.
+
+Reglas para cualquier cliente:
+
+- El `access_token` caduca (normalmente en 1 hora). Al recibir `401`, renovar la sesión
+  (la librería lo hace sola; con `/auth/login`, volver a iniciar sesión) y reintentar.
+- La clave `service_role`, el secreto JWT, la cadena de conexión de la base de datos y las
+  claves de los proveedores de IA **nunca** van en un cliente: solo viven en el servidor.
+- Los datos se consultan siempre por esta API. Las tablas de Supabase no son accesibles
+  directamente desde el cliente; lo único que puede leer es el rol del propio usuario.
+- El streaming (`POST /conversation/{session_id}/stream`) se consume con `fetch`; `EventSource`
+  no permite enviar la cabecera `Authorization`.
+- El dominio del cliente debe estar en `CORS_ALLOW_ORIGINS` del servidor; si no, el navegador
+  bloqueará las peticiones.
+
 ## Roles y acceso
 
 | Recurso | student | teacher / admin |
