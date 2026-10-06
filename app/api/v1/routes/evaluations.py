@@ -223,12 +223,12 @@ def get_active_rubric(db: Session = Depends(get_db)):
     description=(
         "Recalcula las métricas automáticas de una sesión y las persiste en `session_evaluations`. "
         "Puede ejecutarse varias veces sin efectos secundarios funcionales.\n\n"
-        "Requiere rol `teacher`, `admin` o `superadmin`."
+        "Requiere rol `teacher` o `admin`."
     ),
     response_description="Evaluación actualizada con métricas automáticas recalculadas.",
     responses={
         401: {"description": "Token no enviado o inválido"},
-        403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"},
+        403: {"description": "Se requiere rol `teacher` o `admin`"},
         404: {"description": "Sesión no encontrada"},
     },
 )
@@ -250,7 +250,7 @@ def run_auto(
     description=(
         "Devuelve la evaluación completa de una sesión. "
         "Si aún no existe, puede generarse automáticamente con métricas base.\n\n"
-        "Solo el dueño de la sesión o `teacher`, `admin` y `superadmin`."
+        "Solo el dueño de la sesión o `teacher` y `admin`."
     ),
     response_description="Evaluación de la sesión con métricas automáticas y scores de rúbrica.",
     responses={
@@ -297,13 +297,13 @@ def get_evaluation(
     description=(
         "Guarda o actualiza la evaluación del docente sobre una sesión, incluyendo puntajes por criterio "
         "y retroalimentación textual.\n\n"
-        "Requiere rol `teacher`, `admin` o `superadmin`."
+        "Requiere rol `teacher` o `admin`."
     ),
     response_description="Evaluación actualizada con scores y feedback del docente.",
     responses={
         400: {"description": "Status inválido"},
         401: {"description": "Token no enviado o inválido"},
-        403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"},
+        403: {"description": "Se requiere rol `teacher` o `admin`"},
         404: {"description": "La evaluación no existe; ejecutar primero `/auto`"},
     },
 )
@@ -339,7 +339,7 @@ def submit_teacher_evaluation(
     description=(
         "Devuelve la lista de evaluaciones para la vista principal del módulo de evaluación. "
         "Permite filtrar por una o varias sesiones con `session_ids`. "
-        "Los estudiantes solo ven sus propias evaluaciones; `teacher`, `admin` y `superadmin` ven todas."
+        "Los estudiantes solo ven sus propias evaluaciones; `teacher` y `admin` ven todas."
     ),
     response_description="Lista de evaluaciones con datos de sesión y estudiante.",
     responses={401: {"description": "Token no enviado o inválido"}},
@@ -407,7 +407,7 @@ def list_evaluations(
     description=(
         "Devuelve el historial de evaluaciones de un estudiante específico. "
         "Los estudiantes solo pueden consultar su propio historial.\n\n"
-        "Requiere ser el propio estudiante o tener rol `teacher`, `admin` o `superadmin`."
+        "Requiere ser el propio estudiante o tener rol `teacher` o `admin`."
     ),
     response_description="Lista de evaluaciones del estudiante con métricas y feedback.",
     responses={

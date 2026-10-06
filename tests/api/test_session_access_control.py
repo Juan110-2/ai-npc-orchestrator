@@ -123,7 +123,6 @@ class TestSessionAccessControl(unittest.TestCase):
             ("student", self.owner_id),
             ("teacher", None),
             ("admin", None),
-            ("superadmin", None),
         ):
             with self.subTest(role=role):
                 self._login_as(role, user_id)

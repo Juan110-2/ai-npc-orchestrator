@@ -73,7 +73,7 @@ class TestAuthDeps(unittest.TestCase):
     @patch("app.api.v1.deps.UsersRepository.get_by_id")
     def test_require_staff_rules(self, mock_get_by_id):
         uid = uuid4()
-        for role, allowed in (("student", False), ("teacher", True), ("admin", True), ("superadmin", True)):
+        for role, allowed in (("student", False), ("teacher", True), ("admin", True)):
             mock_get_by_id.return_value = MagicMock(role=role)
             if allowed:
                 self.assertEqual(deps.require_staff(db=MagicMock(), payload={"sub": str(uid)}).role, role)

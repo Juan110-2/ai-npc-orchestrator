@@ -142,7 +142,7 @@ def _paginated_sessions(
     if not user:
         return _list_user_sessions(db, user_id, limit, offset, status_filter)
 
-    if user.role in ("admin", "superadmin"):
+    if user.role == "admin":
         if view == "mine":
             return _list_user_sessions(db, user_id, limit, offset, status_filter)
         if view == "assigned":
@@ -218,7 +218,7 @@ class EndSessionResponse(BaseModel):
     summary="Listar sesiones",
     description=(
         "Devuelve sesiones paginadas con filtrado por rol:\n\n"
-        "- `admin` o `superadmin`: todas las sesiones.\n"
+        "- `admin`: todas las sesiones.\n"
         "- `teacher`: por defecto sus propias sesiones; `view=assigned` devuelve sesiones asignadas a otros usuarios.\n"
         "- `student`: siempre solo sus propias sesiones.\n\n"
         "El parámetro `status` filtra por estado: `active`, `completed` o `terminated`.\n\n"
@@ -265,7 +265,7 @@ def list_sessions(
         "La severidad inicial se toma directamente del escenario.\n\n"
         "Si se omiten `user_id` y `assigned_by`, se toman del usuario autenticado. "
         "Para asignar la sesión a un estudiante, envía su `user_id`.\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`. Un `student` no crea sesiones: "
+        "Requiere JWT y rol `teacher` o `admin`. Un `student` no crea sesiones: "
         "solo realiza las que se le asignan (`user_id`)."
     ),
     response_description="Sesión creada en estado `active`.",
@@ -305,7 +305,7 @@ def start_session(
     summary="Obtener sesión por ID",
     description=(
         "Devuelve el detalle completo de una sesión, incluyendo severidad actual y tiempo acumulado. "
-        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
+        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
     ),
     response_description="Sesión encontrada.",
     responses={**_401, **_403, **_404},
@@ -323,7 +323,7 @@ def get_session(session=Depends(require_session_access)):
         "Marca `time_source='explicit'` en el primer llamado. "
         "Si la sesión ya está cerrada, la operación se ignora silenciosamente.\n\n"
         "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes.\n\n"
-        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
+        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses={**_401, **_403, **_404},
@@ -336,7 +336,7 @@ def get_session(session=Depends(require_session_access)):
         "Alias de `PATCH /{session_id}/time`, útil para integraciones que solo soportan POST "
         "o para envíos con `fetch` y `keepalive` al cerrar la pestaña. "
         "Exige la cabecera `Authorization`, por lo que no sirve con `navigator.sendBeacon`.\n\n"
-        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
+        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses={**_401, **_403, **_404},
@@ -365,7 +365,7 @@ def flush_time(
         "- `success` o `null` -> `completed`\n"
         "- `crisis` -> `terminated`\n"
         "- `inappropriate` -> `terminated`\n\n"
-        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
+        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
     ),
     response_description="Confirmación de cierre con estado final.",
     responses={**_401, **_403, **_404, **_400},

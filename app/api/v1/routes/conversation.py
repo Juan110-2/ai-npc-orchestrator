@@ -42,7 +42,7 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         "6. Persiste el mensaje del NPC (`role=patient`) con severidad, flags y metricas de IA.\n"
         "7. Si la sesion debe cerrarse, la finaliza y dispara la evaluacion automatica.\n\n"
         "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE).\n\n"
-        "Requiere JWT; solo el dueno de la sesion o `teacher`, `admin` y `superadmin` pueden escribir turnos."
+        "Requiere JWT; solo el dueno de la sesion o `teacher` y `admin` pueden escribir turnos."
     ),
     response_description="Mensaje del personaje simulado (NPC) con severidad y metricas de IA.",
     responses={
@@ -104,7 +104,7 @@ def converse(
         "\"closing_kind\": null, \"metrics\": {...}}` | Fin del stream con metricas |\n"
         "| `error` | `{\"error\": \"mensaje\"}` | Error durante la generacion |\n\n"
         "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono.\n\n"
-        "Requiere JWT; solo el dueno de la sesion o `teacher`, `admin` y `superadmin` pueden escribir turnos."
+        "Requiere JWT; solo el dueno de la sesion o `teacher` y `admin` pueden escribir turnos."
     ),
     response_description="Stream SSE (`text/event-stream`) con chunks de texto y evento `done` final.",
     responses={
@@ -148,7 +148,7 @@ def converse_stream(
         "Devuelve la transcripcion completa de una sesion, ordenada cronologicamente. "
         "Incluye todos los mensajes del usuario (`role=trainee`) y del personaje simulado "
         "(`role=patient`), con su severidad registrada, flags conductuales y metricas de IA. "
-        "Requiere ser el dueno de la sesion o tener rol `teacher`, `admin` o `superadmin`."
+        "Requiere ser el dueno de la sesion o tener rol `teacher` o `admin`."
     ),
     response_description="Lista completa de mensajes de la sesion en orden cronologico.",
     responses={

@@ -53,7 +53,7 @@ def resolve_authenticated_user(
     return user
 
 
-STAFF_ROLES = ("teacher", "admin", "superadmin")
+STAFF_ROLES = ("teacher", "admin")
 
 
 def get_user_role(db, user_id: UUID) -> str:
@@ -82,7 +82,7 @@ def require_session_access(
     """
     Exige JWT válido y autoriza el acceso a una sesión concreta.
 
-    Se permite al dueño de la sesión o a `teacher`, `admin` y `superadmin`.
+    Se permite al dueño de la sesión o a `teacher` y `admin`.
     Sesión inexistente -> 404; cualquier otro caso -> 403.
     Retorna la sesión para reutilizarla en la ruta.
     """
@@ -107,7 +107,7 @@ def require_staff(
     payload: dict = Depends(verify_supabase_jwt),
 ) -> UserProfile:
     """
-    Exige JWT válido y rol `teacher`, `admin` o `superadmin`.
+    Exige JWT válido y rol `teacher` o `admin`.
 
     Sin token o sin `sub` válido -> 401; sin perfil local o con otro rol -> 403.
     Retorna el perfil del usuario para reutilizarlo en la ruta.
@@ -116,6 +116,6 @@ def require_staff(
     if user is None or user.role not in STAFF_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Se requiere rol teacher, admin o superadmin",
+            detail="Se requiere rol teacher o admin",
         )
     return user

@@ -9,7 +9,7 @@ from app.schemas.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 _401 = {401: {"description": "Token no enviado o inválido"}}
-_403 = {403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"}}
+_403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
 _404 = {404: {"description": "Perfil no encontrado"}}
 
 
@@ -23,7 +23,7 @@ _404 = {404: {"description": "Perfil no encontrado"}}
         "El perfil define la identidad (`traits`) y el comportamiento conversacional (`behavior`) "
         "del personaje, incluyendo el rango de severidad emocional permitido "
         "(`behavior_min` / `behavior_max`).\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
+        "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Perfil creado con UUID y timestamps.",
     responses={**_401, **_403},
@@ -84,7 +84,7 @@ def get_profile(
         "Actualiza parcialmente un perfil de personaje simulado. "
         "Solo se modifican los campos enviados en el body; los omitidos conservan su valor actual.\n\n"
         "Nota: `traits` y `behavior` se reemplazan por completo si se envían.\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
+        "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Perfil actualizado.",
     responses={**_401, **_403, **_404},
@@ -106,7 +106,7 @@ def update_profile(
         "Elimina permanentemente un perfil de personaje simulado. "
         "Esta operación no se puede deshacer. "
         "Si el perfil está vinculado a sesiones activas, la eliminación puede fallar.\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
+        "Requiere JWT y rol `teacher` o `admin`."
     ),
     responses={**_401, **_403, **_404},
     dependencies=[Depends(require_staff)],

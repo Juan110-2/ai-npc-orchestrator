@@ -90,7 +90,7 @@ class TestEvaluationsAuth(_Base):
         ev = make_evaluation()
         mock_auto.return_value = ev
         mock_submit.return_value = ev
-        for role in ("teacher", "admin", "superadmin"):
+        for role in ("teacher", "admin"):
             with self.subTest(role=role):
                 uid = self.login_as(role)
                 self.assertEqual(self.client.post(f"/evaluation/{ev.session_id}/auto").status_code, 200)
@@ -126,7 +126,7 @@ class TestEvaluationsAuth(_Base):
         q.filter.assert_called_once()
 
     def test_list_returns_all_for_staff(self):
-        for role in ("teacher", "admin", "superadmin"):
+        for role in ("teacher", "admin"):
             with self.subTest(role=role):
                 q = self._list_query()
                 self.login_as(role)
@@ -151,7 +151,7 @@ class TestEvaluationsAuth(_Base):
         self.login_as(None)
         self.assertEqual(self.client.get(url).status_code, 403)
 
-        for role in ("teacher", "admin", "superadmin"):
+        for role in ("teacher", "admin"):
             self.login_as(role)
             self.assertEqual(self.client.get(url).status_code, 200)
 
@@ -218,7 +218,7 @@ class _CatalogMixin:
                 self.assertEqual(self.call(method, url, body).status_code, expected)
 
     def test_staff_has_full_access(self):
-        for role in ("teacher", "admin", "superadmin"):
+        for role in ("teacher", "admin"):
             self.login_as(role)
             for method, url, body, ok in self._routes():
                 with self.subTest(role=role, route=f"{method} {url}"):

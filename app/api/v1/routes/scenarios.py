@@ -11,7 +11,7 @@ from app.schemas.scenario import ScenarioCreate, ScenarioResponse, ScenarioUpdat
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
 _401 = {401: {"description": "Token no enviado o inválido"}}
-_403 = {403: {"description": "Se requiere rol `teacher`, `admin` o `superadmin`"}}
+_403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
 _404 = {404: {"description": "Escenario no encontrado"}}
 
 
@@ -25,7 +25,7 @@ _404 = {404: {"description": "Escenario no encontrado"}}
         "El escenario define la situación narrativa que el personaje simulado conoce, "
         "la severidad emocional inicial, los indicadores de riesgo y las restricciones "
         "de comportamiento.\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
+        "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Escenario creado con UUID y timestamp.",
     responses={**_401, **_403},
@@ -86,7 +86,7 @@ def get_scenario(
         "Actualiza parcialmente un escenario de simulación. "
         "Solo se modifican los campos incluidos en el body.\n\n"
         "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían.\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
+        "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Escenario actualizado.",
     responses={**_401, **_403, **_404},
@@ -110,7 +110,7 @@ def update_scenario(
     description=(
         "Elimina permanentemente un escenario de simulación. "
         "Esta operación no se puede deshacer.\n\n"
-        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
+        "Requiere JWT y rol `teacher` o `admin`."
     ),
     responses={**_401, **_403, **_404},
     dependencies=[Depends(require_staff)],
