@@ -99,6 +99,19 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
           and risk_flags @> '["risk"]'::jsonb
     """), {"sid": str(session_id)}).mappings().one()["n"]
 
+    # Turnos del NPC donde una pregunta de cuidado (risk_check) del estudiante
+    # hizo salir una revelacion real (ideacion, daño, etc.). A diferencia de
+    # risk_alerts_detected, esto NO es una senal negativa sobre el estudiante
+    # -- el estudiante pregunto bien -- pero el profesor igual necesita verla
+    # para saber que hubo contenido de riesgo real en la conversacion.
+    risk_check_alerts = db.execute(text("""
+        select count(*)::int as n
+        from public.conversation_messages
+        where session_id = :sid
+          and role = 'patient'
+          and risk_flags @> '["risk_check"]'::jsonb
+    """), {"sid": str(session_id)}).mappings().one()["n"]
+
     last_model_row = db.execute(text("""
         select ai_model
         from public.conversation_messages
@@ -120,6 +133,7 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
         "severity_peak": round(float(base["severity_peak"]), 1) if base["severity_peak"] is not None else None,
         "severity_final": round(float(base["severity_final"]), 1) if base["severity_final"] is not None else None,
         "risk_alerts_detected": int(risk_alerts or 0),
+        "risk_check_alerts_detected": int(risk_check_alerts or 0),
         "last_ai_model": last_model_row["ai_model"] if last_model_row else None,
         "classifier_calls_by_status": classifier_calls_by_status,
         "classifier_calls_by_category": classifier_calls_by_category,

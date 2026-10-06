@@ -278,7 +278,7 @@ def compute_closing_state(
         kind = "success"
     elif decision and decision.category == MessageCategory.INAPPROPRIATE:
         kind = "inappropriate"
-    elif decision and decision.category == MessageCategory.RISK:
+    elif decision and decision.category in (MessageCategory.RISK, MessageCategory.RISK_CHECK):
         kind = "crisis_riesgo"
     else:
         kind = "crisis"
