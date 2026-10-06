@@ -3,20 +3,28 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from app.api.v1.routes import evaluations as evaluations_routes
-from tests.api.test_utils import build_client, clear_overrides, make_evaluation, make_session, make_user
+from app.api.v1.deps import require_staff
+from tests.api.test_utils import (
+    build_client,
+    clear_overrides,
+    make_evaluation,
+    make_session,
+    make_user,
+    override_auth,
+)
 
 
 class TestEvaluationRoutes(unittest.TestCase):
     def setUp(self):
         self.db = MagicMock()
         self.client = build_client(self.db)
+        override_auth()
 
     def tearDown(self):
         clear_overrides()
 
     @patch("app.api.v1.routes.evaluations.RubricsRepository.get_active")
-    def test_get_active_rubric_returns_public_payload(self, mock_get_active):
+    def test_get_active_rubric_returns_payload(self, mock_get_active):
         rubric = SimpleNamespace(
             id=uuid4(),
             version=1,
@@ -67,7 +75,6 @@ class TestEvaluationRoutes(unittest.TestCase):
             f"criteria=list). Body: {response.text}",
         )
 
-    @patch.object(evaluations_routes, "SUPABASE_JWT_SECRET", None)
     @patch("app.api.v1.routes.evaluations.run_auto_evaluation")
     @patch("app.api.v1.routes.evaluations.SessionRepository.get_by_id")
     @patch("app.api.v1.routes.evaluations.EvaluationsRepository.get_by_session")
@@ -78,6 +85,7 @@ class TestEvaluationRoutes(unittest.TestCase):
         mock_run_auto,
     ):
         session = make_session()
+        override_auth(session.user_id)
         evaluation = make_evaluation(session_id=session.id, student_id=session.user_id)
         mock_get_by_session.return_value = None
         mock_get_session.return_value = session
@@ -92,7 +100,7 @@ class TestEvaluationRoutes(unittest.TestCase):
     def test_run_auto_requires_staff_dependency(self, mock_run_auto):
         evaluation = make_evaluation()
         mock_run_auto.return_value = evaluation
-        self.client.app.dependency_overrides[evaluations_routes._require_staff_or_dev] = (
+        self.client.app.dependency_overrides[require_staff] = (
             lambda: make_user(role="teacher")
         )
 
@@ -104,7 +112,7 @@ class TestEvaluationRoutes(unittest.TestCase):
     @patch("app.api.v1.routes.evaluations.EvaluationsRepository.submit_teacher_evaluation")
     def test_submit_teacher_evaluation_returns_404_when_missing(self, mock_submit):
         mock_submit.return_value = None
-        self.client.app.dependency_overrides[evaluations_routes._require_staff_or_dev] = (
+        self.client.app.dependency_overrides[require_staff] = (
             lambda: make_user(role="teacher")
         )
         session_id = uuid4()
