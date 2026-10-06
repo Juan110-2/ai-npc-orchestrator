@@ -112,7 +112,8 @@ def list_users(
     summary="Actualizar usuario",
     description=(
         "Actualiza parcialmente el rol o el nombre de un usuario.\n\n"
-        "Restricción: un administrador no puede degradar su propio rol desde este endpoint."
+        "Restricción: un administrador no puede degradar su propio rol desde este endpoint.\n\n"
+        "Requiere JWT y rol `admin`."
     ),
     response_description="Perfil de usuario actualizado.",
     responses={

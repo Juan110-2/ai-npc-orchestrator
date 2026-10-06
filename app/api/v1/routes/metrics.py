@@ -220,7 +220,8 @@ def _require_admin(
     summary="Ver métricas por proveedor",
     description=(
         "Devuelve métricas agregadas por proveedor, modelo y propósito de llamada "
-        "a partir de la vista `public.v_provider_metrics`."
+        "a partir de la vista `public.v_provider_metrics`.\n\n"
+        "Requiere JWT y rol `admin`."
     ),
     response_description="Lista de métricas agrupadas por proveedor, modelo y propósito.",
     responses={
@@ -267,7 +268,8 @@ def get_provider_metrics(
     summary="Listar llamadas recientes a IA",
     description=(
         "Devuelve el log más reciente de llamadas a proveedores de IA, con filtros por proveedor, "
-        "propósito y `session_id`, además de paginación por `limit` y `offset`."
+        "propósito y `session_id`, además de paginación por `limit` y `offset`.\n\n"
+        "Requiere JWT y rol `admin`."
     ),
     response_description="Lista paginada de llamadas recientes a IA.",
     responses={
@@ -330,7 +332,8 @@ def list_recent_calls(
     summary="Obtener resumen global de métricas",
     description=(
         "Devuelve un resumen consolidado de las llamadas a IA en tres niveles: `totals`, "
-        "`by_provider` y `by_purpose`."
+        "`by_provider` y `by_purpose`.\n\n"
+        "Requiere JWT y rol `admin`."
     ),
     response_description="Objeto con resumen global, por proveedor y por propósito.",
     responses={

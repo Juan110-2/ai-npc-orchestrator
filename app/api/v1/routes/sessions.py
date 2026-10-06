@@ -263,8 +263,8 @@ def list_sessions(
     description=(
         "Crea e inicia una nueva sesión vinculando un perfil de personaje simulado con un escenario. "
         "La severidad inicial se toma directamente del escenario.\n\n"
-        "Si existe JWT, `user_id` y `assigned_by` pueden omitirse y se infieren automáticamente "
-        "desde el token.\n\n"
+        "Si se omiten `user_id` y `assigned_by`, se toman del usuario autenticado. "
+        "Para asignar la sesión a un estudiante, envía su `user_id`.\n\n"
         "Requiere JWT y rol `teacher`, `admin` o `superadmin`. Un `student` no crea sesiones: "
         "solo realiza las que se le asignan (`user_id`)."
     ),
@@ -322,7 +322,8 @@ def get_session(session=Depends(require_session_access)):
         "Acumula tiempo de práctica reportado por el frontend. "
         "Marca `time_source='explicit'` en el primer llamado. "
         "Si la sesión ya está cerrada, la operación se ignora silenciosamente.\n\n"
-        "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes."
+        "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes.\n\n"
+        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses={**_401, **_403, **_404},
@@ -332,8 +333,10 @@ def get_session(session=Depends(require_session_access)):
     response_model=SessionResponse,
     summary="Alias POST para reportar tiempo",
     description=(
-        "Alias de `PATCH /{session_id}/time`, útil para integraciones que solo soportan POST, "
-        "como `navigator.sendBeacon`."
+        "Alias de `PATCH /{session_id}/time`, útil para integraciones que solo soportan POST "
+        "o para envíos con `fetch` y `keepalive` al cerrar la pestaña. "
+        "Exige la cabecera `Authorization`, por lo que no sirve con `navigator.sendBeacon`.\n\n"
+        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses={**_401, **_403, **_404},
@@ -361,7 +364,8 @@ def flush_time(
         "el cálculo de métricas automáticas de evaluación.\n\n"
         "- `success` o `null` -> `completed`\n"
         "- `crisis` -> `terminated`\n"
-        "- `inappropriate` -> `terminated`"
+        "- `inappropriate` -> `terminated`\n\n"
+        "Requiere ser el dueño de la sesión o tener rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Confirmación de cierre con estado final.",
     responses={**_401, **_403, **_404, **_400},

@@ -21,13 +21,13 @@ API del orquestador de simulaciones con personajes NPC impulsados por IA.
 2. `POST /scenarios/create` para crear el escenario
 3. `POST /profiles/create` para crear el perfil del NPC
 
-**Inicio de sesión de práctica**:
+**Asignación de la sesión** (`teacher` o `admin`):
 
-1. `POST /sessions/start` para vincular perfil, escenario y estudiante
+1. `POST /sessions/start` para vincular perfil y escenario y asignar la sesión a un estudiante (`user_id`)
 
 **Práctica del estudiante**:
 
-1. `GET /sessions/` para consultar sesiones disponibles
+1. `GET /sessions/` para consultar las sesiones que tiene asignadas
 2. `POST /conversation/{session_id}` para conversar por turnos
 3. `POST /conversation/{session_id}/stream` para streaming SSE
 4. `PATCH /sessions/{session_id}/time` para reportar tiempo de práctica
@@ -51,11 +51,34 @@ API del orquestador de simulaciones con personajes NPC impulsados por IA.
 
 ## Autenticación
 
-Los endpoints protegidos requieren un JWT de Supabase:
+Solo son públicos `POST /auth/login`, `POST /auth/signup` y `POST /auth/forgot-password`.
+Todo lo demás requiere un JWT de Supabase en la cabecera:
 
 `Authorization: Bearer <token>`
 
-`SUPABASE_JWT_SECRET` es obligatorio salvo que `ALLOW_UNSECURE_MOCK_AUTH=true` (solo desarrollo local).
+- **Obtener el token**: `POST /auth/login` con email y contraseña; usa el valor de `access_token`.
+- **Usarlo en Swagger**: botón **Authorize**, pegar el token y confirmar. Swagger lo enviará en cada petición.
+- **401**: token ausente, inválido o caducado.
+- **403**: token válido, pero el usuario no tiene permiso sobre ese recurso.
+
+El rol (`student`, `teacher`, `admin`) se guarda en el perfil del usuario, no en el token.
+Todo usuario nuevo es `student`; un `admin` cambia el rol con `PATCH /admin/users/{user_id}`.
+
+## Roles y acceso
+
+| Recurso | student | teacher / admin |
+|---|---|---|
+| Sesiones: listar | Solo las suyas | `teacher`: las suyas o `view=assigned`; `admin`: todas |
+| Sesiones: crear (`POST /sessions/start`) | No | Sí |
+| Sesión, tiempo, cierre, conversación e historial | Solo las suyas | Cualquiera |
+| Perfiles y escenarios: consultar | Sí | Sí |
+| Perfiles y escenarios: crear, editar, eliminar | No | Sí |
+| Evaluación: ver | Solo las suyas | Todas |
+| Evaluación: recalcular y calificar | No | Sí |
+| Lista de estudiantes (`GET /admin/students`) | No | Sí |
+
+Las métricas técnicas (`/admin/metrics/*`) y la gestión de usuarios (`GET /admin/users`,
+`PATCH /admin/users/{user_id}`) son solo de `admin`.
 
 ## Severidad emocional
 

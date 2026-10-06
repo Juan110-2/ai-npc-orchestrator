@@ -22,7 +22,8 @@ _404 = {404: {"description": "Perfil no encontrado"}}
         "Crea un nuevo perfil de personaje simulado (NPC). "
         "El perfil define la identidad (`traits`) y el comportamiento conversacional (`behavior`) "
         "del personaje, incluyendo el rango de severidad emocional permitido "
-        "(`behavior_min` / `behavior_max`)."
+        "(`behavior_min` / `behavior_max`).\n\n"
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Perfil creado con UUID y timestamps.",
     responses={**_401, **_403},
@@ -39,7 +40,10 @@ def create_profile(
     "/",
     response_model=list[ProfileResponse],
     summary="Listar perfiles",
-    description="Devuelve todos los perfiles de personajes simulados registrados en el sistema.",
+    description=(
+        "Devuelve todos los perfiles de personajes simulados registrados en el sistema.\n\n"
+        "Requiere JWT; cualquier usuario autenticado."
+    ),
     response_description="Lista de perfiles ordenada por fecha de creación.",
     responses=_401,
     dependencies=[Depends(verify_supabase_jwt)],
@@ -54,7 +58,10 @@ def get_profiles(
     "/{profile_id}",
     response_model=ProfileResponse,
     summary="Obtener perfil por ID",
-    description="Devuelve el detalle completo de un perfil de personaje simulado.",
+    description=(
+        "Devuelve el detalle completo de un perfil de personaje simulado.\n\n"
+        "Requiere JWT; cualquier usuario autenticado."
+    ),
     response_description="Perfil encontrado.",
     responses={**_401, **_404},
     dependencies=[Depends(verify_supabase_jwt)],
@@ -76,7 +83,8 @@ def get_profile(
     description=(
         "Actualiza parcialmente un perfil de personaje simulado. "
         "Solo se modifican los campos enviados en el body; los omitidos conservan su valor actual.\n\n"
-        "Nota: `traits` y `behavior` se reemplazan por completo si se envían."
+        "Nota: `traits` y `behavior` se reemplazan por completo si se envían.\n\n"
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Perfil actualizado.",
     responses={**_401, **_403, **_404},
@@ -97,7 +105,8 @@ def update_profile(
     description=(
         "Elimina permanentemente un perfil de personaje simulado. "
         "Esta operación no se puede deshacer. "
-        "Si el perfil está vinculado a sesiones activas, la eliminación puede fallar."
+        "Si el perfil está vinculado a sesiones activas, la eliminación puede fallar.\n\n"
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
     ),
     responses={**_401, **_403, **_404},
     dependencies=[Depends(require_staff)],

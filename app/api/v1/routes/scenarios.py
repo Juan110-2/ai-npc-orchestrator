@@ -24,7 +24,8 @@ _404 = {404: {"description": "Escenario no encontrado"}}
         "Crea un nuevo escenario de simulación. "
         "El escenario define la situación narrativa que el personaje simulado conoce, "
         "la severidad emocional inicial, los indicadores de riesgo y las restricciones "
-        "de comportamiento."
+        "de comportamiento.\n\n"
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Escenario creado con UUID y timestamp.",
     responses={**_401, **_403},
@@ -41,7 +42,10 @@ def create_scenario(
     "/",
     response_model=list[ScenarioResponse],
     summary="Listar escenarios",
-    description="Devuelve todos los escenarios de simulación registrados en el sistema.",
+    description=(
+        "Devuelve todos los escenarios de simulación registrados en el sistema.\n\n"
+        "Requiere JWT; cualquier usuario autenticado."
+    ),
     response_description="Lista de escenarios.",
     responses=_401,
     dependencies=[Depends(verify_supabase_jwt)],
@@ -56,7 +60,10 @@ def list_scenarios(
     "/{scenario_id}",
     response_model=ScenarioResponse,
     summary="Obtener escenario por ID",
-    description="Devuelve el detalle completo de un escenario de simulación.",
+    description=(
+        "Devuelve el detalle completo de un escenario de simulación.\n\n"
+        "Requiere JWT; cualquier usuario autenticado."
+    ),
     response_description="Escenario encontrado.",
     responses={**_401, **_404},
     dependencies=[Depends(verify_supabase_jwt)],
@@ -78,7 +85,8 @@ def get_scenario(
     description=(
         "Actualiza parcialmente un escenario de simulación. "
         "Solo se modifican los campos incluidos en el body.\n\n"
-        "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían."
+        "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían.\n\n"
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Escenario actualizado.",
     responses={**_401, **_403, **_404},
@@ -101,7 +109,8 @@ def update_scenario(
     summary="Eliminar escenario",
     description=(
         "Elimina permanentemente un escenario de simulación. "
-        "Esta operación no se puede deshacer."
+        "Esta operación no se puede deshacer.\n\n"
+        "Requiere JWT y rol `teacher`, `admin` o `superadmin`."
     ),
     responses={**_401, **_403, **_404},
     dependencies=[Depends(require_staff)],

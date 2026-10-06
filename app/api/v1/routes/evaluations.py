@@ -406,7 +406,8 @@ def list_evaluations(
     summary="Historial de evaluaciones de un estudiante",
     description=(
         "Devuelve el historial de evaluaciones de un estudiante específico. "
-        "Los estudiantes solo pueden consultar su propio historial."
+        "Los estudiantes solo pueden consultar su propio historial.\n\n"
+        "Requiere ser el propio estudiante o tener rol `teacher`, `admin` o `superadmin`."
     ),
     response_description="Lista de evaluaciones del estudiante con métricas y feedback.",
     responses={
