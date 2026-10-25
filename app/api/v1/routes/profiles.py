@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, require_staff
+from app.api.v1.deps import ensure_author_or_admin, get_db, require_staff
 from app.core.auth import verify_supabase_jwt
 from app.models.user_profile import UserProfile
 from app.repositories.profile_repository import ProfileRepository
@@ -11,6 +11,7 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 _401 = {401: {"description": "Token no enviado o inválido"}}
 _403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
+_403_DELETE = {403: {"description": "Se requiere rol `teacher` o `admin`, y ser el autor del caso o `admin`"}}
 _404 = {404: {"description": "Perfil no encontrado"}}
 
 
@@ -110,17 +111,21 @@ def update_profile(
     summary="Eliminar perfil",
     description=(
         "Elimina permanentemente un perfil de personaje simulado. "
-        "Esta operación no se puede deshacer. "
-        "Si el perfil está vinculado a sesiones activas, la eliminación puede fallar.\n\n"
+        "Esta operación no se puede deshacer y elimina también las sesiones que usan el perfil, "
+        "con sus mensajes y evaluaciones.\n\n"
+        "Solo puede eliminarlo su autor (`created_by`) o un `admin`; "
+        "los perfiles sin autor registrado solo los elimina un `admin`.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
-    responses={**_401, **_403, **_404},
-    dependencies=[Depends(require_staff)],
+    responses={**_401, **_403_DELETE, **_404},
 )
 def delete_profile(
     profile_id: str,
     db: Session = Depends(get_db),
+    user: UserProfile = Depends(require_staff),
 ):
-    deleted = ProfileRepository.delete(db, profile_id)
-    if not deleted:
+    item = ProfileRepository.get_by_id(db, profile_id)
+    if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
+    ensure_author_or_admin(user, item.created_by, "perfil")
+    ProfileRepository.delete(db, profile_id)

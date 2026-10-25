@@ -119,3 +119,18 @@ def require_staff(
             detail="Se requiere rol teacher o admin",
         )
     return user
+
+
+def ensure_author_or_admin(user: UserProfile, created_by, resource: str) -> None:
+    """
+    Solo el autor del caso o un admin pueden eliminarlo.
+
+    Un caso sin autor registrado (creado antes de guardar `created_by`) solo lo elimina un admin.
+    """
+    if user.role == "admin":
+        return
+    if created_by is None or str(created_by) != str(user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Solo el autor del {resource} o un admin pueden eliminarlo",
+        )

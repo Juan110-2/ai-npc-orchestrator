@@ -222,8 +222,42 @@ class _CatalogMixin:
         for role in ("teacher", "admin"):
             self.login_as(role)
             for method, url, body, ok in self._routes():
+                if method == "delete":
+                    continue  # el borrado depende del autor: ver test_delete_*
                 with self.subTest(role=role, route=f"{method} {url}"):
                     self.assertEqual(self.call(method, url, body).status_code, ok)
+
+    def _delete(self, created_by):
+        self._repo_mocks["get_by_id"].return_value.created_by = created_by
+        self._repo_mocks["delete"].reset_mock()
+        return self.call("delete", f"{self.prefix}/{uuid4()}/delete")
+
+    def test_delete_by_author(self):
+        me = self.login_as("teacher")
+        self.assertEqual(self._delete(me).status_code, 204)
+        self._repo_mocks["delete"].assert_called_once()
+
+    def test_delete_by_other_teacher_is_403(self):
+        self.login_as("teacher")
+        self.assertEqual(self._delete(uuid4()).status_code, 403)
+        self._repo_mocks["delete"].assert_not_called()
+
+    def test_delete_without_author_only_admin(self):
+        self.login_as("teacher")
+        self.assertEqual(self._delete(None).status_code, 403)
+        self._repo_mocks["delete"].assert_not_called()
+        self.login_as("admin")
+        self.assertEqual(self._delete(None).status_code, 204)
+
+    def test_admin_deletes_any(self):
+        self.login_as("admin")
+        self.assertEqual(self._delete(uuid4()).status_code, 204)
+
+    def test_delete_missing_is_404(self):
+        self.login_as("teacher")
+        self._repo_mocks["get_by_id"].return_value = None
+        self.assertEqual(self.call("delete", f"{self.prefix}/{uuid4()}/delete").status_code, 404)
+        self._repo_mocks["delete"].assert_not_called()
 
     def test_create_records_author(self):
         for role in ("teacher", "admin"):
@@ -244,7 +278,7 @@ class TestProfilesAuth(_CatalogMixin, _Base):
         now = datetime.now(timezone.utc)
         return SimpleNamespace(
             id=uuid4(), name="Ana", description="d", traits={}, behavior={},
-            created_at=now, updated_at=now,
+            created_at=now, updated_at=now, created_by=None,
         )
 
 
@@ -258,7 +292,7 @@ class TestScenariosAuth(_CatalogMixin, _Base):
     def make_row(self):
         return SimpleNamespace(
             id=uuid4(), name="Esc", context="ctx", severity=3, risk_flags=[],
-            constraints={}, created_at=datetime.now(timezone.utc),
+            constraints={}, created_at=datetime.now(timezone.utc), created_by=None,
         )
 
 
