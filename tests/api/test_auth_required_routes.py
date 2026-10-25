@@ -185,6 +185,7 @@ class _CatalogMixin:
             for name, value in (
                 (self.list_method, [row]), ("get_by_id", row),
                 ("create", row), ("update", row), ("delete", True),
+                ("count_sessions", 0),
             )
         ]
         self._repo_mocks = {}
@@ -252,6 +253,14 @@ class _CatalogMixin:
     def test_admin_deletes_any(self):
         self.login_as("admin")
         self.assertEqual(self._delete(uuid4()).status_code, 204)
+
+    def test_delete_with_sessions_is_409(self):
+        for role in ("teacher", "admin"):
+            with self.subTest(role=role):
+                me = self.login_as(role)
+                self._repo_mocks["count_sessions"].return_value = 2
+                self.assertEqual(self._delete(me).status_code, 409)
+                self._repo_mocks["delete"].assert_not_called()
 
     def test_delete_missing_is_404(self):
         self.login_as("teacher")

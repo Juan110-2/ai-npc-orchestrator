@@ -14,6 +14,7 @@ router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 _401 = {401: {"description": "Token no enviado o inválido"}}
 _403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
 _403_DELETE = {403: {"description": "Se requiere rol `teacher` o `admin`, y ser el autor del caso o `admin`"}}
+_409_DELETE = {409: {"description": "El caso tiene sesiones registradas; no se elimina para conservar su trazabilidad"}}
 _404 = {404: {"description": "Escenario no encontrado"}}
 
 
@@ -113,13 +114,14 @@ def update_scenario(
     summary="Eliminar escenario",
     description=(
         "Elimina permanentemente un escenario de simulación. "
-        "Esta operación no se puede deshacer y elimina también las sesiones que usan el escenario, "
-        "con sus mensajes y evaluaciones.\n\n"
+        "Esta operación no se puede deshacer. "
+        "Si el escenario ya tiene sesiones registradas, no se elimina (409), "
+        "para conservar la trazabilidad de las prácticas.\n\n"
         "Solo puede eliminarlo su autor (`created_by`) o un `admin`; "
         "los escenarios sin autor registrado solo los elimina un `admin`.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
-    responses={**_401, **_403_DELETE, **_404},
+    responses={**_401, **_403_DELETE, **_404, **_409_DELETE},
 )
 def delete_scenario(
     scenario_id: UUID,
@@ -130,4 +132,13 @@ def delete_scenario(
     if not item:
         raise HTTPException(status_code=404, detail="Scenario not found")
     ensure_author_or_admin(user, item.created_by, "escenario")
+    sessions = ScenarioRepository.count_sessions(db, item.id)
+    if sessions:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"El escenario tiene {sessions} sesion(es) registrada(s) y no se puede eliminar, "
+                "para conservar la trazabilidad de las practicas"
+            ),
+        )
     ScenarioRepository.delete(db, scenario_id)

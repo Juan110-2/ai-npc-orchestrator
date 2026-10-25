@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.profile import Profile
 from app.models.sessions import Session as SessionModel
-from app.models.conversation_message import ConversationMessage
 from app.schemas.profile import ProfileCreate, ProfileUpdate
 
 
@@ -46,24 +45,14 @@ class ProfileRepository:
         if not profile:
             return False
 
-        linked_session_ids = [
-            row[0]
-            for row in db.query(SessionModel.id)
-            .filter(SessionModel.profile_id == profile.id)
-            .all()
-        ]
-
-        if linked_session_ids:
-            db.query(ConversationMessage).filter(
-                ConversationMessage.session_id.in_(linked_session_ids)
-            ).delete(synchronize_session=False)
-            db.query(SessionModel).filter(
-                SessionModel.id.in_(linked_session_ids)
-            ).delete(synchronize_session=False)
-
+        # Sin cascada: la ruta impide borrar casos con sesiones, para conservar su trazabilidad.
         db.delete(profile)
         db.commit()
         return True
+
+    @staticmethod
+    def count_sessions(db: Session, profile_id) -> int:
+        return db.query(SessionModel).filter(SessionModel.profile_id == profile_id).count()
 
     @staticmethod
     def get_by_id(db: Session, profile_id: str) -> Profile | None:

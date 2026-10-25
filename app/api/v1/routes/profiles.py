@@ -12,6 +12,7 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 _401 = {401: {"description": "Token no enviado o inválido"}}
 _403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
 _403_DELETE = {403: {"description": "Se requiere rol `teacher` o `admin`, y ser el autor del caso o `admin`"}}
+_409_DELETE = {409: {"description": "El caso tiene sesiones registradas; no se elimina para conservar su trazabilidad"}}
 _404 = {404: {"description": "Perfil no encontrado"}}
 
 
@@ -111,13 +112,14 @@ def update_profile(
     summary="Eliminar perfil",
     description=(
         "Elimina permanentemente un perfil de personaje simulado. "
-        "Esta operación no se puede deshacer y elimina también las sesiones que usan el perfil, "
-        "con sus mensajes y evaluaciones.\n\n"
+        "Esta operación no se puede deshacer. "
+        "Si el perfil ya tiene sesiones registradas, no se elimina (409), "
+        "para conservar la trazabilidad de las prácticas.\n\n"
         "Solo puede eliminarlo su autor (`created_by`) o un `admin`; "
         "los perfiles sin autor registrado solo los elimina un `admin`.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
-    responses={**_401, **_403_DELETE, **_404},
+    responses={**_401, **_403_DELETE, **_404, **_409_DELETE},
 )
 def delete_profile(
     profile_id: str,
@@ -128,4 +130,13 @@ def delete_profile(
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
     ensure_author_or_admin(user, item.created_by, "perfil")
+    sessions = ProfileRepository.count_sessions(db, item.id)
+    if sessions:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"El perfil tiene {sessions} sesion(es) registrada(s) y no se puede eliminar, "
+                "para conservar la trazabilidad de las practicas"
+            ),
+        )
     ProfileRepository.delete(db, profile_id)

@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.scenario import Scenario
 from app.models.sessions import Session as SessionModel
-from app.models.conversation_message import ConversationMessage
 from app.schemas.scenario import ScenarioCreate, ScenarioUpdate
 
 class ScenarioRepository:
@@ -42,21 +41,11 @@ class ScenarioRepository:
         if not scenario:
             return False
 
-        linked_session_ids = [
-            row[0]
-            for row in db.query(SessionModel.id)
-            .filter(SessionModel.scenario_id == scenario.id)
-            .all()
-        ]
-
-        if linked_session_ids:
-            db.query(ConversationMessage).filter(
-                ConversationMessage.session_id.in_(linked_session_ids)
-            ).delete(synchronize_session=False)
-            db.query(SessionModel).filter(
-                SessionModel.id.in_(linked_session_ids)
-            ).delete(synchronize_session=False)
-
+        # Sin cascada: la ruta impide borrar casos con sesiones, para conservar su trazabilidad.
         db.delete(scenario)
         db.commit()
         return True
+
+    @staticmethod
+    def count_sessions(db: Session, scenario_id) -> int:
+        return db.query(SessionModel).filter(SessionModel.scenario_id == scenario_id).count()
