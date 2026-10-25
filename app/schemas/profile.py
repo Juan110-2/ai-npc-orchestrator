@@ -114,6 +114,9 @@ class ProfileResponse(BaseModel):
     )
     created_at: datetime = Field(..., description="Fecha y hora de creación (UTC).")
     updated_at: datetime = Field(..., description="Fecha y hora de última modificación (UTC).")
+    created_by: Optional[UUID] = Field(
+        None, description="Docente que creó el perfil (informativo; no restringe el acceso)."
+    )
 
     model_config = {
         "from_attributes": True,
@@ -126,6 +129,7 @@ class ProfileResponse(BaseModel):
                 "behavior": _BEHAVIOR_EXAMPLE,
                 "created_at": "2025-05-01T10:00:00Z",
                 "updated_at": "2025-05-01T10:00:00Z",
+                "created_by": "c3d4e5f6-a7b8-9012-cdef-123456789012",
             }
         },
     }

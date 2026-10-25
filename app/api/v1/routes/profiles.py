@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, require_staff
 from app.core.auth import verify_supabase_jwt
+from app.models.user_profile import UserProfile
 from app.repositories.profile_repository import ProfileRepository
 from app.schemas.profile import ProfileCreate, ProfileResponse, ProfileUpdate
 
@@ -23,17 +24,19 @@ _404 = {404: {"description": "Perfil no encontrado"}}
         "El perfil define la identidad (`traits`) y el comportamiento conversacional (`behavior`) "
         "del personaje, incluyendo el rango de severidad emocional permitido "
         "(`behavior_min` / `behavior_max`).\n\n"
+        "El usuario autenticado queda registrado como autor (`created_by`); "
+        "el campo es informativo y no restringe quién puede ver o editar el perfil.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
-    response_description="Perfil creado con UUID y timestamps.",
+    response_description="Perfil creado con UUID, timestamps y autor.",
     responses={**_401, **_403},
-    dependencies=[Depends(require_staff)],
 )
 def create_profile(
     payload: ProfileCreate,
     db: Session = Depends(get_db),
+    user: UserProfile = Depends(require_staff),
 ):
-    return ProfileRepository.create(db, payload)
+    return ProfileRepository.create(db, payload, created_by=user.id)
 
 
 @router.get(

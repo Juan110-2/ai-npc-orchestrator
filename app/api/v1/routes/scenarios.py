@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, require_staff
 from app.core.auth import verify_supabase_jwt
+from app.models.user_profile import UserProfile
 from app.repositories.scenario_repository import ScenarioRepository
 from app.schemas.scenario import ScenarioCreate, ScenarioResponse, ScenarioUpdate
 
@@ -25,17 +26,19 @@ _404 = {404: {"description": "Escenario no encontrado"}}
         "El escenario define la situación narrativa que el personaje simulado conoce, "
         "la severidad emocional inicial, los indicadores de riesgo y las restricciones "
         "de comportamiento.\n\n"
+        "El usuario autenticado queda registrado como autor (`created_by`); "
+        "el campo es informativo y no restringe quién puede ver o editar el escenario.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
-    response_description="Escenario creado con UUID y timestamp.",
+    response_description="Escenario creado con UUID, timestamp y autor.",
     responses={**_401, **_403},
-    dependencies=[Depends(require_staff)],
 )
 def create_scenario(
     payload: ScenarioCreate,
     db: Session = Depends(get_db),
+    user: UserProfile = Depends(require_staff),
 ):
-    return ScenarioRepository.create(db, payload)
+    return ScenarioRepository.create(db, payload, created_by=user.id)
 
 
 @router.get(

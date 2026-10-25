@@ -187,8 +187,9 @@ class _CatalogMixin:
                 ("create", row), ("update", row), ("delete", True),
             )
         ]
+        self._repo_mocks = {}
         for p in self._repo_patches:
-            p.start()
+            self._repo_mocks[p.attribute] = p.start()
 
     def tearDown(self):
         for p in self._repo_patches:
@@ -223,6 +224,13 @@ class _CatalogMixin:
             for method, url, body, ok in self._routes():
                 with self.subTest(role=role, route=f"{method} {url}"):
                     self.assertEqual(self.call(method, url, body).status_code, ok)
+
+    def test_create_records_author(self):
+        for role in ("teacher", "admin"):
+            with self.subTest(role=role):
+                me = self.login_as(role)
+                self.call("post", f"{self.prefix}/create", self.create_body)
+                self.assertEqual(self._repo_mocks["create"].call_args.kwargs["created_by"], me)
 
 
 class TestProfilesAuth(_CatalogMixin, _Base):

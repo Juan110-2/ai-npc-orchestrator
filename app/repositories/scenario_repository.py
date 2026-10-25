@@ -7,8 +7,8 @@ from app.schemas.scenario import ScenarioCreate, ScenarioUpdate
 class ScenarioRepository:
 
     @staticmethod
-    def create(db: Session, payload: ScenarioCreate) -> Scenario:
-        scenario = Scenario(**payload.model_dump())
+    def create(db: Session, payload: ScenarioCreate, created_by=None) -> Scenario:
+        scenario = Scenario(**payload.model_dump(), created_by=created_by)
         db.add(scenario)
         db.commit()
         db.refresh(scenario)

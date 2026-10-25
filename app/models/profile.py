@@ -21,6 +21,8 @@ class Profile(Base):
     description = Column(String, nullable=False)
     traits = Column(JSONB, nullable=False, default=dict)
     behavior = Column(JSONB, nullable=False, default=dict)
+    # Docente que creó el perfil. No restringe el acceso: los casos son compartidos.
+    created_by = Column(UUID(as_uuid=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

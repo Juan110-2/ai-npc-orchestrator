@@ -107,6 +107,9 @@ class ScenarioUpdate(BaseModel):
 class ScenarioResponse(ScenarioCreate):
     id: UUID = Field(..., description="Identificador único del escenario.")
     created_at: datetime = Field(..., description="Fecha y hora de creación (UTC).")
+    created_by: Optional[UUID] = Field(
+        None, description="Docente que creó el escenario (informativo; no restringe el acceso)."
+    )
 
     model_config = {
         "from_attributes": True,
@@ -119,6 +122,7 @@ class ScenarioResponse(ScenarioCreate):
                 "risk_flags": ["ideación_pasiva"],
                 "constraints": {},
                 "created_at": "2025-05-01T10:00:00Z",
+                "created_by": "c3d4e5f6-a7b8-9012-cdef-123456789012",
             }
         },
     }

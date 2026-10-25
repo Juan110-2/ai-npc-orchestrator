@@ -8,12 +8,13 @@ from app.schemas.profile import ProfileCreate, ProfileUpdate
 class ProfileRepository:
 
     @staticmethod
-    def create(db: Session, payload: ProfileCreate) -> Profile:
+    def create(db: Session, payload: ProfileCreate, created_by=None) -> Profile:
         profile = Profile(
             name=payload.name,
             description=payload.description,
             traits=payload.traits or {},
             behavior=payload.behavior or {},
+            created_by=created_by,
         )
         db.add(profile)
         db.commit()
