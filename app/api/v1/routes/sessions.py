@@ -124,7 +124,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 _404 = {404: {"description": "Sesión no encontrada"}}
 _400 = {400: {"description": "Solicitud inválida, por ejemplo una sesión ya cerrada"}}
 _401 = {401: {"description": "Token ausente o inválido"}}
-_403 = {403: {"description": "La sesión pertenece a otro usuario"}}
+_403 = {403: {"description": "La sesión no es del usuario, ni la asignó (`teacher`), y no es `admin`"}}
 
 
 def _paginated_sessions(
@@ -218,8 +218,11 @@ class EndSessionResponse(BaseModel):
     summary="Listar sesiones",
     description=(
         "Devuelve sesiones paginadas con filtrado por rol:\n\n"
-        "- `admin`: todas las sesiones.\n"
-        "- `teacher`: por defecto sus propias sesiones; `view=assigned` devuelve sesiones asignadas a otros usuarios.\n"
+        "- `admin`: por defecto todas las sesiones; `view=mine` las que inició él; `view=assigned` las de sus "
+        "estudiantes (las que él les asignó).\n"
+        "- `teacher`: por defecto las sesiones que inició él (para probar sus casos); `view=assigned` las de sus "
+        "estudiantes, es decir, las sesiones que él les asignó. No ve las sesiones que otros docentes asignaron, "
+        "aunque sean del mismo estudiante.\n"
         "- `student`: siempre solo sus propias sesiones.\n\n"
         "El parámetro `status` filtra por estado: `active`, `completed` o `terminated`.\n\n"
         "Requiere JWT."
@@ -230,7 +233,14 @@ class EndSessionResponse(BaseModel):
 def list_sessions(
     page: int = Query(1, ge=1, description="Número de página, base 1."),
     limit: int = Query(20, ge=1, le=100, description="Cantidad máxima de ítems por página."),
-    view: Optional[str] = Query(None, description="Filtro de vista: `mine` o `assigned`."),
+    view: Optional[str] = Query(
+        None,
+        description=(
+            "Filtro de vista: `mine` (las sesiones que inició el propio usuario; para `admin`, en lugar de "
+            "todas) o `assigned` (las de sus estudiantes: las que el `teacher` o `admin` les asignó, nunca las "
+            "asignadas por otros docentes). Un `student` siempre ve solo las propias."
+        ),
+    ),
     status_filter: Optional[str] = Query(
         None,
         alias="status",
@@ -305,7 +315,7 @@ def start_session(
     summary="Obtener sesión por ID",
     description=(
         "Devuelve el detalle completo de una sesión, incluyendo severidad actual y tiempo acumulado. "
-        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
+        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
     ),
     response_description="Sesión encontrada.",
     responses={**_401, **_403, **_404},
@@ -323,7 +333,7 @@ def get_session(session=Depends(require_session_access)):
         "Marca `time_source='explicit'` en el primer llamado. "
         "Si la sesión ya está cerrada, la operación se ignora silenciosamente.\n\n"
         "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes.\n\n"
-        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
+        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses={**_401, **_403, **_404},
@@ -336,7 +346,7 @@ def get_session(session=Depends(require_session_access)):
         "Alias de `PATCH /{session_id}/time`, útil para integraciones que solo soportan POST "
         "o para envíos con `fetch` y `keepalive` al cerrar la pestaña. "
         "Exige la cabecera `Authorization`, por lo que no sirve con `navigator.sendBeacon`.\n\n"
-        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
+        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
     responses={**_401, **_403, **_404},
@@ -365,7 +375,7 @@ def flush_time(
         "- `success` o `null` -> `completed`\n"
         "- `crisis` -> `terminated`\n"
         "- `inappropriate` -> `terminated`\n\n"
-        "Requiere ser el dueño de la sesión o tener rol `teacher` o `admin`."
+        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
     ),
     response_description="Confirmación de cierre con estado final.",
     responses={**_401, **_403, **_404, **_400},

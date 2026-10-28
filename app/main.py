@@ -104,12 +104,12 @@ Reglas para cualquier cliente:
 |---|---|---|
 | Sesiones: listar | Solo las suyas | `teacher`: las suyas o `view=assigned`; `admin`: todas |
 | Sesiones: crear (`POST /sessions/start`) | No | Sí |
-| Sesión, tiempo, cierre, conversación e historial | Solo las suyas | Cualquiera |
+| Sesión, tiempo, cierre, conversación e historial | Solo las suyas | `teacher`: las suyas o las que asignó; `admin`: todas |
 | Perfiles y escenarios: consultar | Sí | Sí |
 | Perfiles y escenarios: crear y usar en sesiones | No | Sí |
 | Perfiles y escenarios: editar y eliminar | No | Solo el autor (`created_by`) o `admin` |
-| Evaluación: ver | Solo las suyas | Todas |
-| Evaluación: recalcular y calificar | No | Sí |
+| Evaluación: ver y listar | Solo las suyas | `teacher`: las suyas o las de sesiones que asignó; `admin`: todas |
+| Evaluación: recalcular y calificar | No | `teacher`: las suyas o las que asignó; `admin`: todas |
 | Lista de estudiantes (`GET /admin/students`) | No | Sí |
 
 Las métricas técnicas (`/admin/metrics/*`) y la gestión de usuarios (`GET /admin/users`,

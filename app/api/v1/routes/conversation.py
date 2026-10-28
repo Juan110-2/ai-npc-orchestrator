@@ -49,12 +49,12 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         "se borra el mensaje del usuario, la severidad vuelve a su valor previo y se responde `502`. "
         "Se puede reenviar el mismo mensaje sin duplicados.\n\n"
         "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE).\n\n"
-        "Requiere JWT; solo el dueno de la sesion o `teacher` y `admin` pueden escribir turnos."
+        "Requiere JWT; solo el dueno de la sesion, `admin` o el `teacher` que la asigno pueden escribir turnos."
     ),
     response_description="Mensaje del personaje simulado (NPC) con severidad y metricas de IA.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "La sesion pertenece a otro usuario"},
+        403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
         502: {"description": "La IA fallo; el turno se descarta y se puede reenviar el mensaje"},
@@ -130,12 +130,12 @@ def converse(
         "(se borra el mensaje del usuario, la severidad vuelve a su valor previo y no se guarda "
         "respuesta parcial): se puede reenviar el mismo mensaje sin duplicados |\n\n"
         "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono.\n\n"
-        "Requiere JWT; solo el dueno de la sesion o `teacher` y `admin` pueden escribir turnos."
+        "Requiere JWT; solo el dueno de la sesion, `admin` o el `teacher` que la asigno pueden escribir turnos."
     ),
     response_description="Stream SSE (`text/event-stream`) con chunks de texto y evento `done` final.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "La sesion pertenece a otro usuario"},
+        403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
     },
@@ -174,12 +174,12 @@ def converse_stream(
         "Devuelve la transcripcion completa de una sesion, ordenada cronologicamente. "
         "Incluye todos los mensajes del usuario (`role=trainee`) y del personaje simulado "
         "(`role=patient`), con su severidad registrada, flags conductuales y metricas de IA. "
-        "Requiere ser el dueno de la sesion o tener rol `teacher` o `admin`."
+        "Requiere ser el dueno de la sesion, `admin` o el `teacher` que la asigno."
     ),
     response_description="Lista completa de mensajes de la sesion en orden cronologico.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "La sesion pertenece a otro usuario"},
+        403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
         404: {"description": "Sesion no encontrada"},
     },
 )
