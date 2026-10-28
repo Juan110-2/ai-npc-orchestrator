@@ -66,6 +66,47 @@ class TestConversationRoutes(unittest.TestCase):
         mock_commit.assert_called_once_with(self.db, session.id)
         mock_finalize.assert_called_once()
 
+    @patch("app.api.v1.routes.conversation.finalize_and_evaluate_sync")
+    @patch("app.api.v1.routes.conversation.persist_patient_message")
+    @patch("app.api.v1.routes.conversation.rollback_turn")
+    @patch("app.api.v1.routes.conversation.generate_sync_ai_response")
+    @patch("app.api.v1.routes.conversation.process_turn")
+    @patch("app.api.v1.routes.conversation.resolve_session_context")
+    def test_converse_discards_turn_and_returns_502_when_ai_fails(
+        self,
+        mock_resolve,
+        mock_process_turn,
+        mock_generate,
+        mock_rollback,
+        mock_persist,
+        mock_finalize,
+    ):
+        session = make_session()
+        override_session_access(session)
+        mock_resolve.return_value = (session, SimpleNamespace(), SimpleNamespace())
+        trainee_msg_id = uuid4()
+        mock_process_turn.return_value = SimpleNamespace(
+            trainee_msg_id=trainee_msg_id,
+            previous_severity=2.8,
+        )
+        mock_generate.side_effect = RuntimeError("provider down")
+
+        response = self.client.post(
+            f"/conversation/{session.id}",
+            json={"content": "Hola"},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("turno se descarto", response.json()["detail"])
+        mock_rollback.assert_called_once_with(
+            self.db,
+            session.id,
+            trainee_msg_id=trainee_msg_id,
+            previous_severity=2.8,
+        )
+        mock_persist.assert_not_called()
+        mock_finalize.assert_not_called()
+
     @patch("app.api.v1.routes.conversation.resolve_session_context")
     def test_converse_rejects_blank_content(self, mock_resolve):
         session = make_session()
