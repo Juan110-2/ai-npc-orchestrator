@@ -156,8 +156,8 @@ class TestRepositoriesIntegration(unittest.TestCase):
         self.assertEqual(updated.description, "Perfil actualizado en integración.")
         self.assertEqual(updated.behavior["behavior_max"], 4.0)
 
-        deleted = ProfileRepository.delete(self.db, profile.id)
-        self.assertTrue(deleted)
+        deleted = ProfileRepository.delete_if_unused(self.db, profile.id)
+        self.assertEqual(deleted.status, "deleted")
         self.profile_ids.remove(profile.id)
         self.assertIsNone(ProfileRepository.get_by_id(self.db, profile.id))
 
@@ -177,8 +177,8 @@ class TestRepositoriesIntegration(unittest.TestCase):
         self.assertEqual(updated.severity, 2)
         self.assertEqual(updated.constraints["forbidden_topics"], ["familia"])
 
-        deleted = ScenarioRepository.delete(self.db, scenario.id)
-        self.assertTrue(deleted)
+        deleted = ScenarioRepository.delete_if_unused(self.db, scenario.id)
+        self.assertEqual(deleted.status, "deleted")
         self.scenario_ids.remove(scenario.id)
         self.assertIsNone(ScenarioRepository.get_by_id(self.db, scenario.id))
 

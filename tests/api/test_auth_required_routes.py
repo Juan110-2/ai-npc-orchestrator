@@ -9,8 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.auth import verify_supabase_jwt
 from app.main import app
+from app.repositories.catalog_usage import BLOCKED, DELETED, NOT_FOUND, CaseUsage, DeleteResult
 from tests.api.test_utils import (
     build_client,
     clear_overrides,
@@ -184,8 +187,9 @@ class _CatalogMixin:
             patch(f"{self.repo}.{name}", return_value=value)
             for name, value in (
                 (self.list_method, [row]), ("get_by_id", row),
-                ("create", row), ("update", row), ("delete", True),
-                ("count_sessions", 0),
+                ("create", row), ("update", row),
+                ("delete_if_unused", DeleteResult(DELETED, deleted_sessions=0)),
+                ("get_usage", CaseUsage(total_sessions=0, sessions_with_activity=0)),
             )
         ]
         self._repo_mocks = {}
@@ -230,23 +234,23 @@ class _CatalogMixin:
 
     def _delete(self, created_by):
         self._repo_mocks["get_by_id"].return_value.created_by = created_by
-        self._repo_mocks["delete"].reset_mock()
+        self._repo_mocks["delete_if_unused"].reset_mock()
         return self.call("delete", f"{self.prefix}/{uuid4()}/delete")
 
     def test_delete_by_author(self):
         me = self.login_as("teacher")
         self.assertEqual(self._delete(me).status_code, 204)
-        self._repo_mocks["delete"].assert_called_once()
+        self._repo_mocks["delete_if_unused"].assert_called_once()
 
     def test_delete_by_other_teacher_is_403(self):
         self.login_as("teacher")
         self.assertEqual(self._delete(uuid4()).status_code, 403)
-        self._repo_mocks["delete"].assert_not_called()
+        self._repo_mocks["delete_if_unused"].assert_not_called()
 
     def test_delete_without_author_only_admin(self):
         self.login_as("teacher")
         self.assertEqual(self._delete(None).status_code, 403)
-        self._repo_mocks["delete"].assert_not_called()
+        self._repo_mocks["delete_if_unused"].assert_not_called()
         self.login_as("admin")
         self.assertEqual(self._delete(None).status_code, 204)
 
@@ -254,19 +258,88 @@ class _CatalogMixin:
         self.login_as("admin")
         self.assertEqual(self._delete(uuid4()).status_code, 204)
 
-    def test_delete_with_sessions_is_409(self):
+    def test_delete_only_unused_sessions_is_204(self):
+        # El repositorio ya borro las sesiones sin uso junto con el caso.
+        me = self.login_as("teacher")
+        self._repo_mocks["delete_if_unused"].return_value = DeleteResult(DELETED, deleted_sessions=2)
+        self.assertEqual(self._delete(me).status_code, 204)
+        self._repo_mocks["delete_if_unused"].assert_called_once()
+
+    def test_delete_with_activity_is_409(self):
         for role in ("teacher", "admin"):
             with self.subTest(role=role):
                 me = self.login_as(role)
-                self._repo_mocks["count_sessions"].return_value = 2
-                self.assertEqual(self._delete(me).status_code, 409)
-                self._repo_mocks["delete"].assert_not_called()
+                self._repo_mocks["delete_if_unused"].return_value = DeleteResult(BLOCKED, sessions_with_activity=2)
+                response = self._delete(me)
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("2 sesión(es) con actividad registrada", response.json()["detail"])
+                self._repo_mocks["delete_if_unused"].assert_called_once()
+
+    def test_delete_integrity_error_is_409(self):
+        me = self.login_as("teacher")
+        self._repo_mocks["delete_if_unused"].side_effect = IntegrityError("DELETE", {}, Exception("fk"))
+        response = self._delete(me)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("inténtalo de nuevo", response.json()["detail"])
+        self.db.rollback.assert_called()
 
     def test_delete_missing_is_404(self):
         self.login_as("teacher")
         self._repo_mocks["get_by_id"].return_value = None
         self.assertEqual(self.call("delete", f"{self.prefix}/{uuid4()}/delete").status_code, 404)
-        self._repo_mocks["delete"].assert_not_called()
+        self._repo_mocks["delete_if_unused"].assert_not_called()
+
+    def test_delete_disappears_during_lock_is_404(self):
+        me = self.login_as("teacher")
+        self._repo_mocks["delete_if_unused"].return_value = DeleteResult(NOT_FOUND)
+        self.assertEqual(self._delete(me).status_code, 404)
+
+    def _usage(self, created_by=None, **usage):
+        self._repo_mocks["get_by_id"].return_value.created_by = created_by
+        self._repo_mocks["get_usage"].return_value = CaseUsage(
+            total_sessions=usage.get("total", 3), sessions_with_activity=usage.get("active", 1)
+        )
+        return self.call("get", f"{self.prefix}/{uuid4()}/usage")
+
+    def test_usage_requires_token(self):
+        self.assertEqual(self.call("get", f"{self.prefix}/{uuid4()}/usage").status_code, 401)
+
+    def test_usage_forbidden_for_student(self):
+        self.login_as("student")
+        self.assertEqual(self.call("get", f"{self.prefix}/{uuid4()}/usage").status_code, 403)
+
+    def test_usage_counts_and_allowed_for_author(self):
+        me = self.login_as("teacher")
+        response = self._usage(created_by=me, total=3, active=1)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"total_sessions": 3, "sessions_with_activity": 1, "unused_sessions": 2, "can_delete": False, "allowed": True},
+        )
+
+    def test_usage_can_delete_when_no_activity(self):
+        me = self.login_as("teacher")
+        body = self._usage(created_by=me, total=2, active=0).json()
+        self.assertEqual((body["unused_sessions"], body["can_delete"]), (2, True))
+
+    def test_usage_not_allowed_for_other_teacher_or_without_author(self):
+        self.login_as("teacher")
+        self.assertFalse(self._usage(created_by=uuid4()).json()["allowed"])
+        self.assertFalse(self._usage(created_by=None).json()["allowed"])
+
+    def test_usage_admin_is_always_allowed(self):
+        self.login_as("admin")
+        self.assertTrue(self._usage(created_by=None).json()["allowed"])
+        self.assertTrue(self._usage(created_by=uuid4()).json()["allowed"])
+
+    def test_usage_missing_is_404(self):
+        self.login_as("teacher")
+        self._repo_mocks["get_by_id"].return_value = None
+        self.assertEqual(self.call("get", f"{self.prefix}/{uuid4()}/usage").status_code, 404)
+
+    def test_usage_malformed_id_is_422(self):
+        self.login_as("teacher")
+        self.assertEqual(self.call("get", f"{self.prefix}/no-es-uuid/usage").status_code, 422)
 
     def test_create_records_author(self):
         for role in ("teacher", "admin"):

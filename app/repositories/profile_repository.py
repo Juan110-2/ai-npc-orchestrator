@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.profile import Profile
 from app.models.sessions import Session as SessionModel
+from app.repositories.catalog_usage import CaseUsage, DeleteResult, delete_case_if_unused, get_case_usage
 from app.schemas.profile import ProfileCreate, ProfileUpdate
 
 
@@ -40,19 +41,13 @@ class ProfileRepository:
         return profile
 
     @staticmethod
-    def delete(db: Session, profile_id: str) -> bool:
-        profile = ProfileRepository.get_by_id(db, profile_id)
-        if not profile:
-            return False
-
-        # Sin cascada: la ruta impide borrar casos con sesiones, para conservar su trazabilidad.
-        db.delete(profile)
-        db.commit()
-        return True
+    def delete_if_unused(db: Session, profile_id) -> DeleteResult:
+        """Borra el perfil y sus sesiones sin uso; si alguna tiene actividad, no toca nada."""
+        return delete_case_if_unused(db, Profile, SessionModel.profile_id, profile_id)
 
     @staticmethod
-    def count_sessions(db: Session, profile_id) -> int:
-        return db.query(SessionModel).filter(SessionModel.profile_id == profile_id).count()
+    def get_usage(db: Session, profile_id) -> CaseUsage | None:
+        return get_case_usage(db, Profile, SessionModel.profile_id, profile_id)
 
     @staticmethod
     def get_by_id(db: Session, profile_id: str) -> Profile | None:

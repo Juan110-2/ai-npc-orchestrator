@@ -1,12 +1,15 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import ensure_author_or_admin, get_db, require_staff
+from app.api.v1.deps import can_delete_case, ensure_author_or_admin, get_db, require_staff
 from app.core.auth import verify_supabase_jwt
 from app.models.user_profile import UserProfile
+from app.repositories.catalog_usage import BLOCKED, NOT_FOUND
 from app.repositories.scenario_repository import ScenarioRepository
+from app.schemas.catalog_usage import CatalogUsageResponse
 from app.schemas.scenario import ScenarioCreate, ScenarioResponse, ScenarioUpdate
 
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
@@ -14,7 +17,14 @@ router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 _401 = {401: {"description": "Token no enviado o inválido"}}
 _403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
 _403_DELETE = {403: {"description": "Se requiere rol `teacher` o `admin`, y ser el autor del caso o `admin`"}}
-_409_DELETE = {409: {"description": "El caso tiene sesiones registradas; no se elimina para conservar su trazabilidad"}}
+_409_DELETE = {
+    409: {
+        "description": (
+            "El caso tiene sesiones con actividad registrada (mensajes, evaluación o registros de IA), "
+            "o se registró actividad mientras se eliminaba; no se elimina para conservar la trazabilidad"
+        )
+    }
+}
 _404 = {404: {"description": "Escenario no encontrado"}}
 
 
@@ -114,9 +124,12 @@ def update_scenario(
     summary="Eliminar escenario",
     description=(
         "Elimina permanentemente un escenario de simulación. "
-        "Esta operación no se puede deshacer. "
-        "Si el escenario ya tiene sesiones registradas, no se elimina (409), "
-        "para conservar la trazabilidad de las prácticas.\n\n"
+        "Esta operación no se puede deshacer.\n\n"
+        "Una sesión tiene actividad si registra al menos un mensaje de conversación, una evaluación "
+        "o una llamada a IA. Si alguna sesión del escenario tiene actividad, no se elimina nada (409), "
+        "para conservar la trazabilidad de las prácticas. Si todas sus sesiones están sin uso "
+        "(asignadas o creadas pero nunca usadas), se eliminan junto con el escenario en una sola "
+        "transacción. Consulta antes `GET /scenarios/{scenario_id}/usage`.\n\n"
         "Solo puede eliminarlo su autor (`created_by`) o un `admin`; "
         "los escenarios sin autor registrado solo los elimina un `admin`.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
@@ -132,13 +145,59 @@ def delete_scenario(
     if not item:
         raise HTTPException(status_code=404, detail="Scenario not found")
     ensure_author_or_admin(user, item.created_by, "escenario")
-    sessions = ScenarioRepository.count_sessions(db, item.id)
-    if sessions:
+    try:
+        result = ScenarioRepository.delete_if_unused(db, item.id)
+    except IntegrityError:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"El escenario tiene {sessions} sesion(es) registrada(s) y no se puede eliminar, "
-                "para conservar la trazabilidad de las practicas"
+                "No se pudo eliminar el escenario porque se registró una sesión o actividad "
+                "mientras se eliminaba. Revisa su uso e inténtalo de nuevo."
             ),
         )
-    ScenarioRepository.delete(db, scenario_id)
+    if result.status == NOT_FOUND:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    if result.status == BLOCKED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"El escenario tiene {result.sessions_with_activity} sesión(es) con actividad registrada "
+                "y no se puede eliminar, para conservar la trazabilidad de las prácticas."
+            ),
+        )
+
+
+@router.get(
+    "/{scenario_id}/usage",
+    response_model=CatalogUsageResponse,
+    summary="Uso del escenario por sesiones",
+    description=(
+        "Indica cuántas sesiones usan el escenario y si se puede eliminar. "
+        "Una sesión tiene actividad si registra al menos un mensaje de conversación, una evaluación "
+        "o una llamada a IA; las demás se consideran sin uso y se eliminan junto con el escenario.\n\n"
+        "`can_delete` es `true` si no hay sesiones con actividad; `allowed` es `true` si el usuario "
+        "autenticado es el autor del escenario o `admin` (los escenarios sin autor registrado solo los elimina un `admin`).\n\n"
+        "Requiere JWT y rol `teacher` o `admin`."
+    ),
+    response_description="Conteo de sesiones del escenario y permisos de eliminación.",
+    responses={**_401, **_403, **_404},
+)
+def get_scenario_usage(
+    scenario_id: UUID,
+    db: Session = Depends(get_db),
+    user: UserProfile = Depends(require_staff),
+):
+    item = ScenarioRepository.get_by_id(db, scenario_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    usage = ScenarioRepository.get_usage(db, item.id)
+    if usage is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    return CatalogUsageResponse(
+        total_sessions=usage.total_sessions,
+        sessions_with_activity=usage.sessions_with_activity,
+        unused_sessions=usage.unused_sessions,
+        can_delete=usage.can_delete,
+        allowed=can_delete_case(user, item.created_by),
+    )

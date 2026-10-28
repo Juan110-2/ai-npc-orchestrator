@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.scenario import Scenario
 from app.models.sessions import Session as SessionModel
+from app.repositories.catalog_usage import CaseUsage, DeleteResult, delete_case_if_unused, get_case_usage
 from app.schemas.scenario import ScenarioCreate, ScenarioUpdate
 
 class ScenarioRepository:
@@ -36,16 +37,10 @@ class ScenarioRepository:
         return scenario
 
     @staticmethod
-    def delete(db: Session, scenario_id) -> bool:
-        scenario = ScenarioRepository.get_by_id(db, scenario_id)
-        if not scenario:
-            return False
-
-        # Sin cascada: la ruta impide borrar casos con sesiones, para conservar su trazabilidad.
-        db.delete(scenario)
-        db.commit()
-        return True
+    def delete_if_unused(db: Session, scenario_id) -> DeleteResult:
+        """Borra el escenario y sus sesiones sin uso; si alguna tiene actividad, no toca nada."""
+        return delete_case_if_unused(db, Scenario, SessionModel.scenario_id, scenario_id)
 
     @staticmethod
-    def count_sessions(db: Session, scenario_id) -> int:
-        return db.query(SessionModel).filter(SessionModel.scenario_id == scenario_id).count()
+    def get_usage(db: Session, scenario_id) -> CaseUsage | None:
+        return get_case_usage(db, Scenario, SessionModel.scenario_id, scenario_id)
