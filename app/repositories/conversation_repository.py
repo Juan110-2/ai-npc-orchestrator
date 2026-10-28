@@ -1,3 +1,4 @@
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.conversation_message import ConversationMessage
@@ -47,6 +48,34 @@ class ConversationRepository:
             .filter(
                 ConversationMessage.id == message_id,
                 ConversationMessage.session_id == session_id,
+            )
+            .delete(synchronize_session=False)
+        )
+
+    @staticmethod
+    def delete_patient_replies_after(db: Session, session_id, trainee_msg_id) -> int:
+        """Borra las respuestas del paciente creadas despues del mensaje trainee indicado.
+
+        Sirve para limpiar una respuesta huerfana de un turno descartado cuyo id no se
+        llego a conocer (el commit paso pero fallo el refresh). Solo toca mensajes
+        `patient` de la misma sesion con created_at estrictamente posterior al del
+        trainee, asi que los turnos previos quedan intactos. Si el trainee ya no existe
+        no borra nada. No confirma la transaccion (lo hace el caller).
+        """
+        trainee_created_at = (
+            select(ConversationMessage.created_at)
+            .where(
+                ConversationMessage.id == trainee_msg_id,
+                ConversationMessage.session_id == session_id,
+            )
+            .scalar_subquery()
+        )
+        return (
+            db.query(ConversationMessage)
+            .filter(
+                ConversationMessage.session_id == session_id,
+                ConversationMessage.role == "patient",
+                ConversationMessage.created_at > trainee_created_at,
             )
             .delete(synchronize_session=False)
         )

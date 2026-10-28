@@ -18,6 +18,7 @@ class TestRollbackTurn(unittest.TestCase):
         ok = rollback_turn(db, session_id, trainee_msg_id=msg_id, previous_severity=2.5)
 
         self.assertTrue(ok)
+        mock_conv_repo.delete_patient_replies_after.assert_called_once_with(db, session_id, msg_id)
         mock_conv_repo.delete_by_id.assert_called_once_with(db, session_id, msg_id)
         self.assertEqual(session_row.current_severity, 2.5)
         db.commit.assert_called_once()

@@ -371,6 +371,11 @@ def rollback_turn(
     Borra el mensaje trainee del turno y devuelve current_severity a su valor
     previo, en una sola transaccion, para que reenviar el mismo mensaje no
     duplique el texto del estudiante ni aplique la severidad dos veces.
+    Tambien borra la respuesta del paciente del turno si llego a guardarse (p. ej.
+    el commit paso pero fallo el refresh): como su id no se conoce, se borran los
+    mensajes `patient` de la sesion creados despues del trainee del turno, y se
+    hace antes de borrar el trainee porque la consulta usa su created_at. Los
+    mensajes de turnos anteriores son previos al trainee y no se tocan.
     El resto de la sesion (status, ended_at, base_severity, tiempo) no se toca
     porque el cierre solo se aplica despues de guardar la respuesta del paciente.
     Los registros de ai_call_logs se conservan. Nunca lanza: devuelve False si
@@ -381,6 +386,7 @@ def rollback_turn(
     try:
         db.rollback()
         if trainee_msg_id is not None:
+            ConversationRepository.delete_patient_replies_after(db, session_id, trainee_msg_id)
             ConversationRepository.delete_by_id(db, session_id, trainee_msg_id)
         if previous_severity is not None:
             session = SessionRepository.get_by_id(db, session_id)
