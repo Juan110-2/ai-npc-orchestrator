@@ -87,15 +87,17 @@ class TestEvaluationsAuth(_Base):
                 403,
             )
 
+    @patch(f"{_EV}.SessionRepository.get_by_id")
     @patch(f"{_EV}.EvaluationsRepository.submit_teacher_evaluation")
     @patch(f"{_EV}.run_auto_evaluation")
-    def test_write_routes_allowed_for_staff(self, mock_auto, mock_submit):
+    def test_write_routes_allowed_for_staff(self, mock_auto, mock_submit, mock_session):
         ev = make_evaluation()
         mock_auto.return_value = ev
         mock_submit.return_value = ev
         for role in ("teacher", "admin"):
             with self.subTest(role=role):
                 uid = self.login_as(role)
+                mock_session.return_value = make_session(id=ev.session_id, assigned_by=uid)
                 self.assertEqual(self.client.post(f"/evaluation/{ev.session_id}/auto").status_code, 200)
                 r = self.client.put(f"/evaluation/{ev.session_id}", json={"scores": {}, "status": "draft"})
                 self.assertEqual(r.status_code, 200)
@@ -128,21 +130,48 @@ class TestEvaluationsAuth(_Base):
         self.assertEqual(self.client.get("/evaluation/").status_code, 200)
         q.filter.assert_called_once()
 
-    def test_list_returns_all_for_staff(self):
-        for role in ("teacher", "admin"):
-            with self.subTest(role=role):
-                q = self._list_query()
-                self.login_as(role)
-                self.assertEqual(self.client.get("/evaluation/").status_code, 200)
-                q.filter.assert_not_called()
+    def test_list_returns_all_for_admin(self):
+        q = self._list_query()
+        self.login_as("admin")
+        self.assertEqual(self.client.get("/evaluation/").status_code, 200)
+        q.filter.assert_not_called()
+
+    def test_list_filters_own_and_assigned_for_teacher(self):
+        q = self._list_query()
+        teacher = self.login_as("teacher")
+        self.assertEqual(self.client.get("/evaluation/").status_code, 200)
+        q.filter.assert_called_once()
+        sql = self._compile(q.filter.call_args.args[0])
+        self.assertIn("session_evaluations.student_id", sql)
+        self.assertIn("sessions.user_id", sql)
+        self.assertIn("sessions.assigned_by", sql)
+        self.assertEqual(sql.count(str(teacher)), 3)
+
+    def test_visibility_filter_by_role(self):
+        from app.api.v1.routes.evaluations import _evaluation_visibility_filter
+
+        uid = uuid4()
+        self.assertIsNone(_evaluation_visibility_filter("admin", uid))
+        for role in ("student", "otro"):
+            sql = self._compile(_evaluation_visibility_filter(role, uid))
+            self.assertIn("session_evaluations.student_id", sql)
+            self.assertNotIn("assigned_by", sql)
+            self.assertNotIn("sessions.user_id", sql)
+
+    @staticmethod
+    def _compile(clause):
+        from sqlalchemy.dialects import postgresql
+
+        return str(clause.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
     @patch(f"{_EV}.SessionRepository.get_by_id")
     @patch(f"{_EV}.EvaluationsRepository.get_by_session")
     def test_get_evaluation_owner_ok_other_student_403_staff_ok(self, mock_get, mock_session):
         owner = uuid4()
+        assigner = uuid4()
         ev = make_evaluation(student_id=owner)
         mock_get.return_value = ev
-        mock_session.return_value = make_session(id=ev.session_id, user_id=owner)
+        mock_session.return_value = make_session(id=ev.session_id, user_id=owner, assigned_by=assigner)
         url = f"/evaluation/{ev.session_id}"
 
         self.login_as("student", owner)
@@ -154,19 +183,99 @@ class TestEvaluationsAuth(_Base):
         self.login_as(None)
         self.assertEqual(self.client.get(url).status_code, 403)
 
+        # teacher que asigno la sesion y admin: ok; teacher que no la asigno: 403
+        self.login_as("teacher", assigner)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.login_as("admin")
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.login_as("teacher")
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    @patch(f"{_EV}.SessionRepository.get_by_id")
+    @patch(f"{_EV}.EvaluationsRepository.get_by_session")
+    def test_get_evaluation_teacher_owner_ok_and_orphan_evaluation_only_admin(self, mock_get, mock_session):
+        owner = uuid4()
+        ev = make_evaluation(student_id=owner)
+        url = f"/evaluation/{ev.session_id}"
+        mock_get.return_value = ev
+        mock_session.return_value = make_session(id=ev.session_id, user_id=owner, assigned_by=uuid4())
+
+        self.login_as("teacher", owner)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        mock_session.return_value = None
+        self.login_as("teacher")
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.login_as("admin")
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    @patch(f"{_EV}.SessionRepository.get_by_id")
+    @patch(f"{_EV}.EvaluationsRepository.submit_teacher_evaluation")
+    @patch(f"{_EV}.run_auto_evaluation")
+    def test_write_routes_forbidden_for_teacher_who_did_not_assign(self, mock_auto, mock_submit, mock_session):
+        ev = make_evaluation()
+        mock_session.return_value = make_session(id=ev.session_id, user_id=uuid4(), assigned_by=uuid4())
+        self.login_as("teacher")
+        self.assertEqual(self.client.post(f"/evaluation/{ev.session_id}/auto").status_code, 403)
+        r = self.client.put(f"/evaluation/{ev.session_id}", json={"scores": {}, "status": "draft"})
+        self.assertEqual(r.status_code, 403)
+        mock_auto.assert_not_called()
+        mock_submit.assert_not_called()
+
+    @patch(f"{_EV}.SessionRepository.get_by_id")
+    @patch(f"{_EV}.EvaluationsRepository.submit_teacher_evaluation")
+    @patch(f"{_EV}.run_auto_evaluation")
+    def test_write_routes_allowed_for_teacher_owner_and_404_without_session(self, mock_auto, mock_submit, mock_session):
+        ev = make_evaluation()
+        mock_auto.return_value = ev
+        mock_submit.return_value = ev
+        uid = self.login_as("teacher")
+        mock_session.return_value = make_session(id=ev.session_id, user_id=uid, assigned_by=uuid4())
+        self.assertEqual(self.client.post(f"/evaluation/{ev.session_id}/auto").status_code, 200)
+        r = self.client.put(f"/evaluation/{ev.session_id}", json={"scores": {}, "status": "draft"})
+        self.assertEqual(r.status_code, 200)
+
+        mock_session.return_value = None
         for role in ("teacher", "admin"):
             self.login_as(role)
-            self.assertEqual(self.client.get(url).status_code, 200)
+            self.assertEqual(self.client.post(f"/evaluation/{ev.session_id}/auto").status_code, 404)
+            r = self.client.put(f"/evaluation/{ev.session_id}", json={"scores": {}, "status": "draft"})
+            self.assertEqual(r.status_code, 404)
 
     @patch(f"{_EV}.EvaluationsRepository.list_by_student", return_value=[])
-    def test_student_history_self_or_staff(self, _):
+    def test_student_history_self_or_staff(self, mock_list):
         me = self.login_as("student")
         self.assertEqual(self.client.get(f"/evaluation/student/{me}").status_code, 200)
+        self.assertIsNone(mock_list.call_args.kwargs["assigned_by"])
         self.assertEqual(self.client.get(f"/evaluation/student/{uuid4()}").status_code, 403)
-        self.login_as("teacher")
-        self.assertEqual(self.client.get(f"/evaluation/student/{uuid4()}").status_code, 200)
+        self.login_as(None)
+        self.assertEqual(self.client.get(f"/evaluation/student/{uuid4()}").status_code, 403)
+
+    @patch(f"{_EV}.EvaluationsRepository.list_by_student", return_value=[])
+    def test_student_history_admin_sees_all_teacher_only_assigned(self, mock_list):
+        student = uuid4()
+        url = f"/evaluation/student/{student}"
+
         self.login_as("admin")
-        self.assertEqual(self.client.get(f"/evaluation/student/{uuid4()}").status_code, 200)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertIsNone(mock_list.call_args.kwargs["assigned_by"])
+
+        teacher = self.login_as("teacher")
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(mock_list.call_args.kwargs["assigned_by"], teacher)
+
+        # Un teacher que consulta su propio historial lo ve completo.
+        self.assertEqual(self.client.get(f"/evaluation/student/{teacher}").status_code, 200)
+        self.assertIsNone(mock_list.call_args.kwargs["assigned_by"])
+
+    def test_list_by_student_repository_filters_by_assigner(self):
+        from app.repositories.evaluations_repository import EvaluationsRepository
+
+        db = MagicMock()
+        q = db.query.return_value.filter.return_value
+        q.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = ["x"]
+        self.assertEqual(EvaluationsRepository.list_by_student(db, uuid4(), assigned_by=uuid4()), ["x"])
+        q.join.assert_called_once()
 
 
 class _CatalogMixin:

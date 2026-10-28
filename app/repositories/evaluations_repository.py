@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.rubric_definition import RubricDefinition
 from app.models.session_evaluation import SessionEvaluation
+from app.models.sessions import Session as SessionModel
 
 
 class RubricsRepository:
@@ -41,14 +42,19 @@ class EvaluationsRepository:
         )
 
     @staticmethod
-    def list_by_student(db: Session, student_id: UUID, limit: int = 50):
-        return (
-            db.query(SessionEvaluation)
-            .filter(SessionEvaluation.student_id == student_id)
-            .order_by(desc(SessionEvaluation.created_at))
-            .limit(limit)
-            .all()
-        )
+    def list_by_student(
+        db: Session,
+        student_id: UUID,
+        limit: int = 50,
+        assigned_by: Optional[UUID] = None,
+    ):
+        """Evaluaciones de un estudiante; con `assigned_by` solo las de sesiones que ese usuario asignó."""
+        q = db.query(SessionEvaluation).filter(SessionEvaluation.student_id == student_id)
+        if assigned_by is not None:
+            q = q.join(SessionModel, SessionModel.id == SessionEvaluation.session_id).filter(
+                SessionModel.assigned_by == assigned_by
+            )
+        return q.order_by(desc(SessionEvaluation.created_at)).limit(limit).all()
 
     @staticmethod
     def upsert_automatic_metrics(

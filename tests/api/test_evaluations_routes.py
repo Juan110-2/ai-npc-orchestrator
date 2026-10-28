@@ -96,26 +96,28 @@ class TestEvaluationRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["session_id"], str(session.id))
 
+    @patch("app.api.v1.routes.evaluations.SessionRepository.get_by_id")
     @patch("app.api.v1.routes.evaluations.run_auto_evaluation")
-    def test_run_auto_requires_staff_dependency(self, mock_run_auto):
+    def test_run_auto_requires_staff_dependency(self, mock_run_auto, mock_get_session):
         evaluation = make_evaluation()
         mock_run_auto.return_value = evaluation
-        self.client.app.dependency_overrides[require_staff] = (
-            lambda: make_user(role="teacher")
-        )
+        teacher = make_user(role="teacher")
+        mock_get_session.return_value = make_session(id=evaluation.session_id, assigned_by=teacher.id)
+        self.client.app.dependency_overrides[require_staff] = lambda: teacher
 
         response = self.client.post(f"/evaluation/{evaluation.session_id}/auto")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], str(evaluation.id))
 
+    @patch("app.api.v1.routes.evaluations.SessionRepository.get_by_id")
     @patch("app.api.v1.routes.evaluations.EvaluationsRepository.submit_teacher_evaluation")
-    def test_submit_teacher_evaluation_returns_404_when_missing(self, mock_submit):
+    def test_submit_teacher_evaluation_returns_404_when_missing(self, mock_submit, mock_get_session):
         mock_submit.return_value = None
-        self.client.app.dependency_overrides[require_staff] = (
-            lambda: make_user(role="teacher")
-        )
+        teacher = make_user(role="teacher")
         session_id = uuid4()
+        mock_get_session.return_value = make_session(id=session_id, assigned_by=teacher.id)
+        self.client.app.dependency_overrides[require_staff] = lambda: teacher
 
         response = self.client.put(
             f"/evaluation/{session_id}",
