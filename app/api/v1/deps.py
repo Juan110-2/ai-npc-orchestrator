@@ -118,6 +118,32 @@ def require_session_access(
     return session
 
 
+def require_session_owner(
+    session_id: UUID,
+    db=Depends(get_db),
+    payload: dict = Depends(verify_supabase_jwt),
+):
+    """
+    Exige JWT válido y que el usuario sea quien realiza la sesión (`session.user_id`).
+
+    Se usa en las rutas que escriben en una sesión activa (enviar mensajes y reportar
+    tiempo): `admin` y el `teacher` que la asignó pueden verla, pero no escribir en ella.
+    Sesión inexistente -> 404; cualquier otro usuario -> 403.
+    Retorna la sesión para reutilizarla en la ruta.
+    """
+    user_id = get_subject_id(payload)
+    session = SessionRepository.get_by_id(db, session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    if session.user_id is None or session.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo quien realiza la sesión puede escribir en ella",
+        )
+    return session
+
+
 def require_staff(
     db=Depends(get_db),
     payload: dict = Depends(verify_supabase_jwt),

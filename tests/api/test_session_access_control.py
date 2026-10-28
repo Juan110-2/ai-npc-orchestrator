@@ -161,14 +161,33 @@ class TestSessionAccessControl(unittest.TestCase):
                 self.assertEqual(response.json()["id"], str(self.session.id))
 
     @patch("app.api.v1.routes.sessions.SessionRepository.add_time_delta")
-    def test_flush_time_allowed_for_owner_and_staff(self, mock_add):
+    def test_flush_time_allowed_only_for_owner(self, mock_add):
         mock_add.return_value = self.session
-        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id), ("admin", None)):
+        self._login_as("student", self.owner_id)
+        for method in ("patch", "post"):
+            with self.subTest(method=method):
+                response = self._call(method, f"/sessions/{self.session.id}/time", {"delta_seconds": 5})
+                self.assertEqual(response.status_code, 200)
+
+    @patch("app.api.v1.routes.sessions.SessionRepository.add_time_delta")
+    def test_flush_time_forbidden_for_assigner_teacher_and_admin(self, mock_add):
+        for role, user_id in (("teacher", self.teacher_id), ("admin", None)):
             with self.subTest(role=role):
                 self._login_as(role, user_id)
                 for method in ("patch", "post"):
                     response = self._call(method, f"/sessions/{self.session.id}/time", {"delta_seconds": 5})
-                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.status_code, 403)
+                    self.assertIn("Solo quien realiza la sesión", response.json()["detail"])
+        mock_add.assert_not_called()
+
+    def test_write_routes_return_404_for_missing_session(self):
+        self._login_as("student", self.owner_id)
+        for method, url, body in (
+            ("patch", f"/sessions/{uuid4()}/time", {"delta_seconds": 5}),
+            ("post", f"/conversation/{uuid4()}", {"content": "hola"}),
+        ):
+            with self.subTest(route=f"{method} {url}"):
+                self.assertEqual(self._call(method, url, body).status_code, 404)
 
     @patch("app.api.v1.routes.sessions._run_post_close_hooks")
     def test_end_session_allowed_for_owner_and_staff(self, _mock_hooks):
@@ -195,7 +214,7 @@ class TestSessionAccessControl(unittest.TestCase):
     @patch("app.api.v1.routes.conversation.generate_sync_ai_response")
     @patch("app.api.v1.routes.conversation.process_turn")
     @patch("app.api.v1.routes.conversation.resolve_session_context")
-    def test_converse_allowed_for_owner_and_staff(
+    def test_converse_allowed_only_for_owner(
         self, mock_resolve, mock_process, mock_generate, mock_persist, _commit, _finalize
     ):
         mock_resolve.return_value = (self.session, SimpleNamespace(), SimpleNamespace())
@@ -209,11 +228,9 @@ class TestSessionAccessControl(unittest.TestCase):
             latency_ms=1.0,
         )
         mock_persist.return_value = make_message(session_id=self.session.id)
-        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id), ("admin", None)):
-            with self.subTest(role=role):
-                self._login_as(role, user_id)
-                response = self.client.post(f"/conversation/{self.session.id}", json={"content": "hola"})
-                self.assertEqual(response.status_code, 200)
+        self._login_as("student", self.owner_id)
+        response = self.client.post(f"/conversation/{self.session.id}", json={"content": "hola"})
+        self.assertEqual(response.status_code, 200)
 
     @patch("app.services.conversation.streaming.finalize_and_evaluate_stream")
     @patch("app.services.conversation.streaming.commit_stream_message", return_value=True)
@@ -221,7 +238,7 @@ class TestSessionAccessControl(unittest.TestCase):
     @patch("app.api.v1.routes.conversation.build_stream_inputs")
     @patch("app.api.v1.routes.conversation.process_turn")
     @patch("app.api.v1.routes.conversation.resolve_session_context")
-    def test_converse_stream_allowed_for_owner_and_teacher(
+    def test_converse_stream_allowed_only_for_owner(
         self, mock_resolve, mock_process, mock_build, mock_session_local, _commit, _finalize
     ):
         from app.services.conversation.models import StreamInputs
@@ -231,15 +248,36 @@ class TestSessionAccessControl(unittest.TestCase):
         mock_process.return_value = _make_ctx()
         mock_build.return_value = StreamInputs(system_prompt=None, effective_user_input="hola", forced_text="hola")
         mock_session_local.return_value = MagicMock()
-        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id)):
-            with self.subTest(role=role):
-                self._login_as(role, user_id)
-                with self.client.stream(
-                    "POST", f"/conversation/{self.session.id}/stream", json={"content": "hola"}
-                ) as response:
-                    body = "".join(response.iter_text())
-                self.assertEqual(response.status_code, 200)
-                self.assertIn("event: done", body)
+        self._login_as("student", self.owner_id)
+        with self.client.stream(
+            "POST", f"/conversation/{self.session.id}/stream", json={"content": "hola"}
+        ) as response:
+            body = "".join(response.iter_text())
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: done", body)
+
+    @patch("app.api.v1.routes.conversation.generate_sync_ai_response")
+    @patch("app.api.v1.routes.conversation.build_stream_inputs")
+    @patch("app.api.v1.routes.conversation.process_turn")
+    @patch("app.api.v1.routes.conversation.resolve_session_context")
+    def test_converse_forbidden_for_assigner_teacher_and_admin(
+        self, mock_resolve, mock_process, mock_build, mock_generate
+    ):
+        for role, user_id in (("teacher", self.teacher_id), ("admin", None)):
+            for suffix in ("", "/stream"):
+                with self.subTest(role=role, route=suffix or "sync"):
+                    self._login_as(role, user_id)
+                    response = self.client.post(
+                        f"/conversation/{self.session.id}{suffix}", json={"content": "hola"}
+                    )
+                    self.assertEqual(response.status_code, 403)
+                    self.assertIn("Solo quien realiza la sesión", response.json()["detail"])
+        mock_resolve.assert_not_called()
+        mock_process.assert_not_called()
+        mock_build.assert_not_called()
+        mock_generate.assert_not_called()
+        self.db.add.assert_not_called()
+        self.db.commit.assert_not_called()
 
     # --- 403 no persiste ni llama a la IA ------------------------------
 

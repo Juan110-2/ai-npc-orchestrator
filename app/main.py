@@ -104,7 +104,9 @@ Reglas para cualquier cliente:
 |---|---|---|
 | Sesiones: listar | Solo las suyas | `teacher`: las suyas o `view=assigned`; `admin`: todas |
 | Sesiones: crear (`POST /sessions/start`) | No | Sí |
-| Sesión, tiempo, cierre, conversación e historial | Solo las suyas | `teacher`: las suyas o las que asignó; `admin`: todas |
+| Sesión e historial: ver | Solo las suyas | `teacher`: las suyas o las que asignó; `admin`: todas |
+| Conversación (enviar mensajes) y reportar tiempo | Solo las suyas | Solo las suyas: `admin` y el `teacher` que asignó la sesión pueden verla, pero no escribir en ella |
+| Sesión: cerrar (`PATCH /sessions/{id}/end`) | Solo las suyas | `teacher`: las suyas o las que asignó; `admin`: todas (p. ej. sesiones abandonadas) |
 | Perfiles y escenarios: consultar | Sí | Sí |
 | Perfiles y escenarios: crear y usar en sesiones | No | Sí |
 | Perfiles y escenarios: editar y eliminar | No | Solo el autor (`created_by`) o `admin` |

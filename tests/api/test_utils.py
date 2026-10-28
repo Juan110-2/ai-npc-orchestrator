@@ -85,9 +85,10 @@ def override_auth(user_id=None):
 
 def override_session_access(session):
     """Omite la autorización por sesión, para probar solo la lógica de la ruta."""
-    from app.api.v1.deps import require_session_access
+    from app.api.v1.deps import require_session_access, require_session_owner
 
     app.dependency_overrides[require_session_access] = lambda: session
+    app.dependency_overrides[require_session_owner] = lambda: session
 
 
 def make_message(**overrides):

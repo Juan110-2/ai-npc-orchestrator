@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, require_session_access
+from app.api.v1.deps import get_db, require_session_access, require_session_owner
 from app.core.limiter import limiter
 from app.repositories.conversation_repository import ConversationRepository
 from app.schemas.conversation_message import ConversationInput, ConversationMessageResponse
@@ -51,12 +51,12 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         "sin duplicados. Si ademas no se puede confirmar ese descarte se responde `500` y hay que "
         "recargar la conversacion (`GET /{session_id}/history`) antes de reenviar.\n\n"
         "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE).\n\n"
-        "Requiere JWT; solo el dueno de la sesion, `admin` o el `teacher` que la asigno pueden escribir turnos."
+        "Requiere JWT; solo quien realiza la sesion (su dueno) puede escribir turnos: `admin` y el `teacher` que la asigno pueden verla pero no escribir en ella."
     ),
     response_description="Mensaje del personaje simulado (NPC) con severidad y metricas de IA.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
+        403: {"description": "Solo quien realiza la sesion puede escribir en ella (tampoco `admin` ni el `teacher` que la asigno)"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
         500: {"description": "La IA fallo y no se pudo confirmar el descarte del turno; recargar la conversacion antes de reenviar"},
@@ -69,7 +69,7 @@ def converse(
     session_id: UUID,
     payload: ConversationInput,
     db: Session = Depends(get_db),
-    _session=Depends(require_session_access),
+    _session=Depends(require_session_owner),
 ):
     session, profile, scenario = resolve_session_context(session_id, db)
     user_input = validate_user_input(payload.content)
@@ -140,12 +140,12 @@ def converse(
         "mismo mensaje sin duplicados. `discarded: false` indica que no se pudo confirmar el descarte: "
         "hay que recargar la conversacion (`GET /{session_id}/history`) antes de reenviar |\n\n"
         "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono.\n\n"
-        "Requiere JWT; solo el dueno de la sesion, `admin` o el `teacher` que la asigno pueden escribir turnos."
+        "Requiere JWT; solo quien realiza la sesion (su dueno) puede escribir turnos: `admin` y el `teacher` que la asigno pueden verla pero no escribir en ella."
     ),
     response_description="Stream SSE (`text/event-stream`) con chunks de texto y evento `done` final.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
+        403: {"description": "Solo quien realiza la sesion puede escribir en ella (tampoco `admin` ni el `teacher` que la asigno)"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
     },
@@ -156,7 +156,7 @@ def converse_stream(
     session_id: UUID,
     payload: ConversationInput,
     db: Session = Depends(get_db),
-    _session=Depends(require_session_access),
+    _session=Depends(require_session_owner),
 ):
     session, profile, scenario = resolve_session_context(session_id, db)
     user_input = validate_user_input(payload.content)

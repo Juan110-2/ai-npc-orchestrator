@@ -9,7 +9,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, get_subject_id, require_session_access, require_staff
+from app.api.v1.deps import (
+    get_db,
+    get_subject_id,
+    require_session_access,
+    require_session_owner,
+    require_staff,
+)
 from app.core.auth import verify_supabase_jwt
 from app.models.ai_call_log import AICallLog
 from app.repositories.profile_repository import ProfileRepository
@@ -125,6 +131,7 @@ _404 = {404: {"description": "Sesión no encontrada"}}
 _400 = {400: {"description": "Solicitud inválida, por ejemplo una sesión ya cerrada"}}
 _401 = {401: {"description": "Token ausente o inválido"}}
 _403 = {403: {"description": "La sesión no es del usuario, ni la asignó (`teacher`), y no es `admin`"}}
+_403_OWNER = {403: {"description": "Solo quien realiza la sesión puede escribir en ella (tampoco `admin` ni el `teacher` que la asignó)"}}
 
 
 def _paginated_sessions(
@@ -333,10 +340,10 @@ def get_session(session=Depends(require_session_access)):
         "Marca `time_source='explicit'` en el primer llamado. "
         "Si la sesión ya está cerrada, la operación se ignora silenciosamente.\n\n"
         "`delta_seconds` está limitado a 600 segundos por flush para prevenir datos inconsistentes.\n\n"
-        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
+        "Solo lo puede reportar quien realiza la sesión (su dueño); `admin` y el `teacher` que la asignó no."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
-    responses={**_401, **_403, **_404},
+    responses={**_401, **_403_OWNER, **_404},
 )
 @router.post(
     "/{session_id}/time",
@@ -346,17 +353,17 @@ def get_session(session=Depends(require_session_access)):
         "Alias de `PATCH /{session_id}/time`, útil para integraciones que solo soportan POST "
         "o para envíos con `fetch` y `keepalive` al cerrar la pestaña. "
         "Exige la cabecera `Authorization`, por lo que no sirve con `navigator.sendBeacon`.\n\n"
-        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
+        "Solo lo puede reportar quien realiza la sesión (su dueño); `admin` y el `teacher` que la asignó no."
     ),
     response_description="Sesión con el tiempo acumulado actualizado.",
-    responses={**_401, **_403, **_404},
+    responses={**_401, **_403_OWNER, **_404},
     include_in_schema=False,
 )
 def flush_time(
     session_id: UUID,
     body: TimeFlushBody,
     db: Session = Depends(get_db),
-    _session=Depends(require_session_access),
+    _session=Depends(require_session_owner),
 ):
     session = SessionRepository.add_time_delta(db, session_id, body.delta_seconds)
     if not session:
@@ -375,7 +382,8 @@ def flush_time(
         "- `success` o `null` -> `completed`\n"
         "- `crisis` -> `terminated`\n"
         "- `inappropriate` -> `terminated`\n\n"
-        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
+        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó "
+        "(así `admin` y el `teacher` pueden cerrar sesiones abandonadas)."
     ),
     response_description="Confirmación de cierre con estado final.",
     responses={**_401, **_403, **_404, **_400},
