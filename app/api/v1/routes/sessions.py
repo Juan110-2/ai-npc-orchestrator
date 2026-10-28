@@ -280,8 +280,9 @@ def list_sessions(
     description=(
         "Crea e inicia una nueva sesión vinculando un perfil de personaje simulado con un escenario. "
         "La severidad inicial se toma directamente del escenario.\n\n"
-        "Si se omiten `user_id` y `assigned_by`, se toman del usuario autenticado. "
-        "Para asignar la sesión a un estudiante, envía su `user_id`.\n\n"
+        "Quien asigna la sesión (`assigned_by`) es siempre el usuario autenticado; cualquier `assigned_by` "
+        "enviado en el cuerpo se ignora. Si se omite `user_id`, la sesión es del propio usuario autenticado. "
+        "Para asignarla a un estudiante, envía su `user_id`, que debe existir.\n\n"
         "Requiere JWT y rol `teacher` o `admin`. Un `student` no crea sesiones: "
         "solo realiza las que se le asignan (`user_id`)."
     ),
@@ -290,6 +291,7 @@ def list_sessions(
         **_401,
         403: {"description": "El usuario no tiene rol para crear sesiones"},
         404: {"description": "Perfil o escenario no encontrado"},
+        422: {"description": "El `user_id` indicado no corresponde a ningún usuario existente"},
     },
 )
 def start_session(
@@ -303,8 +305,14 @@ def start_session(
     if not profile or not scenario:
         raise HTTPException(status_code=404, detail="Profile or Scenario not found")
 
-    assigned_by = payload_data.assigned_by or caller.id
+    # La atribución es siempre del usuario autenticado: de ella depende el acceso de los docentes.
+    assigned_by = caller.id
     user_id = payload_data.user_id or caller.id
+    if user_id != caller.id and UsersRepository.get_by_id(db, user_id) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="El usuario indicado en `user_id` no existe",
+        )
 
     return SessionRepository.start(
         db,

@@ -24,15 +24,7 @@ class SessionCreate(BaseModel):
     user_id: Optional[UUID] = Field(
         None,
         description=(
-            "UUID del usuario que realizará la sesión. "
-            "Si se omite, se toma automáticamente del JWT del caller."
-        ),
-        examples=[None],
-    )
-    assigned_by: Optional[UUID] = Field(
-        None,
-        description=(
-            "UUID de quien asigna la sesión al usuario. "
+            "UUID del usuario que realizará la sesión; debe existir en `user_profiles`. "
             "Si se omite, se toma automáticamente del JWT del caller."
         ),
         examples=[None],
@@ -44,7 +36,6 @@ class SessionCreate(BaseModel):
                 "profile_id": _PROFILE_ID_EX,
                 "scenario_id": _SCENARIO_ID_EX,
                 "user_id": None,
-                "assigned_by": None,
             }
         }
     }
