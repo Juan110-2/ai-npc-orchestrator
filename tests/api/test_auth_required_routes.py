@@ -172,6 +172,7 @@ class TestEvaluationsAuth(_Base):
 class _CatalogMixin:
     prefix = ""
     repo = ""
+    resource = ""
     create_body: dict = {}
     update_body: dict = {}
     # método -> código esperado para staff
@@ -225,12 +226,75 @@ class _CatalogMixin:
 
     def test_staff_has_full_access(self):
         for role in ("teacher", "admin"):
-            self.login_as(role)
+            uid = self.login_as(role)
+            # editar y eliminar dependen del autor: aqui el caso es del propio usuario
+            self._repo_mocks["get_by_id"].return_value.created_by = uid
             for method, url, body, ok in self._routes():
-                if method == "delete":
-                    continue  # el borrado depende del autor: ver test_delete_*
                 with self.subTest(role=role, route=f"{method} {url}"):
                     self.assertEqual(self.call(method, url, body).status_code, ok)
+
+    def _update(self, created_by, body=None):
+        self._repo_mocks["get_by_id"].return_value.created_by = created_by
+        self._repo_mocks["update"].reset_mock()
+        return self.call("patch", f"{self.prefix}/{uuid4()}/update", body or self.update_body)
+
+    def test_update_by_author(self):
+        me = self.login_as("teacher")
+        self.assertEqual(self._update(me).status_code, 200)
+        self._repo_mocks["update"].assert_called_once()
+
+    def test_update_by_other_teacher_is_403(self):
+        self.login_as("teacher")
+        response = self._update(uuid4())
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], f"Solo el autor del {self.resource} o un admin pueden editarlo")
+        self._repo_mocks["update"].assert_not_called()
+
+    def test_update_without_author_only_admin(self):
+        self.login_as("teacher")
+        response = self._update(None)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], f"Solo el autor del {self.resource} o un admin pueden editarlo")
+        self._repo_mocks["update"].assert_not_called()
+        self.login_as("admin")
+        self.assertEqual(self._update(None).status_code, 200)
+        self._repo_mocks["update"].assert_called_once()
+
+    def test_admin_updates_any(self):
+        self.login_as("admin")
+        self.assertEqual(self._update(uuid4()).status_code, 200)
+        self._repo_mocks["update"].assert_called_once()
+
+    def test_update_missing_is_404(self):
+        for role in ("teacher", "admin"):
+            with self.subTest(role=role):
+                self.login_as(role)
+                self._repo_mocks["get_by_id"].return_value = None
+                self._repo_mocks["update"].reset_mock()
+                self.assertEqual(self.call("patch", f"{self.prefix}/{uuid4()}/update", self.update_body).status_code, 404)
+                self._repo_mocks["update"].assert_not_called()
+
+    def test_update_disappears_before_saving_is_404(self):
+        me = self.login_as("teacher")
+        self._repo_mocks["update"].return_value = None
+        self.assertEqual(self._update(me).status_code, 404)
+
+    def test_update_forbidden_for_student_and_without_token(self):
+        self._repo_mocks["get_by_id"].return_value.created_by = None
+        self.assertEqual(self.call("patch", f"{self.prefix}/{uuid4()}/update", self.update_body).status_code, 401)
+        self.login_as("student")
+        self.assertEqual(self.call("patch", f"{self.prefix}/{uuid4()}/update", self.update_body).status_code, 403)
+        self.login_as(None)
+        self.assertEqual(self.call("patch", f"{self.prefix}/{uuid4()}/update", self.update_body).status_code, 403)
+        self._repo_mocks["update"].assert_not_called()
+
+    def test_update_ignores_created_by_in_body(self):
+        me = self.login_as("teacher")
+        response = self._update(me, {**self.update_body, "created_by": str(uuid4())})
+        self.assertEqual(response.status_code, 200)
+        payload = self._repo_mocks["update"].call_args.args[2]
+        self.assertNotIn("created_by", payload.model_dump(exclude_unset=True))
+        self.assertFalse(hasattr(payload, "created_by"))
 
     def _delete(self, created_by):
         self._repo_mocks["get_by_id"].return_value.created_by = created_by
@@ -244,7 +308,9 @@ class _CatalogMixin:
 
     def test_delete_by_other_teacher_is_403(self):
         self.login_as("teacher")
-        self.assertEqual(self._delete(uuid4()).status_code, 403)
+        response = self._delete(uuid4())
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], f"Solo el autor del {self.resource} o un admin pueden eliminarlo")
         self._repo_mocks["delete_if_unused"].assert_not_called()
 
     def test_delete_without_author_only_admin(self):
@@ -351,6 +417,7 @@ class _CatalogMixin:
 
 class TestProfilesAuth(_CatalogMixin, _Base):
     prefix = "/profiles"
+    resource = "perfil"
     list_method = "get_all"
     repo = "app.api.v1.routes.profiles.ProfileRepository"
     create_body = {"name": "Ana", "description": "d", "traits": {}, "behavior": {}}
@@ -366,6 +433,7 @@ class TestProfilesAuth(_CatalogMixin, _Base):
 
 class TestScenariosAuth(_CatalogMixin, _Base):
     prefix = "/scenarios"
+    resource = "escenario"
     list_method = "list"
     repo = "app.api.v1.routes.scenarios.ScenarioRepository"
     create_body = {"name": "Esc", "context": "ctx", "severity": 3}

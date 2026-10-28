@@ -16,7 +16,7 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 _401 = {401: {"description": "Token no enviado o inválido"}}
 _403 = {403: {"description": "Se requiere rol `teacher` o `admin`"}}
-_403_DELETE = {403: {"description": "Se requiere rol `teacher` o `admin`, y ser el autor del caso o `admin`"}}
+_403_AUTHOR = {403: {"description": "Se requiere rol `teacher` o `admin`, y ser el autor del caso o `admin`"}}
 _409_DELETE = {
     409: {
         "description": (
@@ -104,15 +104,19 @@ def get_profile(
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Perfil actualizado.",
-    responses={**_401, **_403, **_404},
-    dependencies=[Depends(require_staff)],
+    responses={**_401, **_403_AUTHOR, **_404},
 )
 def update_profile(
     profile_id: str,
     payload: ProfileUpdate,
     db: Session = Depends(get_db),
+    user: UserProfile = Depends(require_staff),
 ):
-    profile = ProfileRepository.update(db, profile_id, payload)
+    item = ProfileRepository.get_by_id(db, profile_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    ensure_author_or_admin(user, item.created_by, "perfil", "editarlo")
+    profile = ProfileRepository.update(db, item.id, payload)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
@@ -134,7 +138,7 @@ def update_profile(
         "los perfiles sin autor registrado solo los elimina un `admin`.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
-    responses={**_401, **_403_DELETE, **_404, **_409_DELETE},
+    responses={**_401, **_403_AUTHOR, **_404, **_409_DELETE},
 )
 def delete_profile(
     profile_id: str,
