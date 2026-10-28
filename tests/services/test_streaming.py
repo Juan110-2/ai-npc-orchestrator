@@ -37,6 +37,11 @@ def _make_ctx(**overrides):
     return TurnContext(**data)
 
 
+def _error_payload(event: str) -> dict:
+    assert event.startswith("event: error\ndata: ")
+    return json.loads(event.split("data: ", 1)[1])
+
+
 class TestStreamingConversation(unittest.TestCase):
     @patch("app.services.conversation.streaming.finalize_session_in_generator")
     @patch("app.services.conversation.streaming.run_auto_evaluation_safely")
@@ -135,7 +140,9 @@ class TestStreamingConversation(unittest.TestCase):
 
         # El evento error siempre llega, y es el ultimo
         self.assertTrue(events[-1].startswith("event: error"))
-        self.assertIn("provider down", events[-1])
+        payload = _error_payload(events[-1])
+        self.assertIs(payload["discarded"], True)
+        self.assertIn("se descarto", payload["error"])
         # Se borra el mensaje trainee del turno y se restaura la severidad previa
         mock_conv_repo.delete_by_id.assert_called_once_with(gen_db, session_id, trainee_msg_id)
         self.assertEqual(session_row.current_severity, 2.8)
@@ -181,7 +188,9 @@ class TestStreamingConversation(unittest.TestCase):
             )
 
         self.assertEqual(len(events), 1)
-        self.assertTrue(events[0].startswith("event: error"))
+        payload = _error_payload(events[0])
+        self.assertIs(payload["discarded"], False)
+        self.assertIn("Recarga la conversacion", payload["error"])
         mock_finalize.assert_not_called()
 
     @patch("app.services.conversation.streaming.finalize_and_evaluate_stream")
@@ -217,7 +226,9 @@ class TestStreamingConversation(unittest.TestCase):
             )
         )
 
-        self.assertEqual(events[-1], 'event: error\ndata: {"error": "DB commit failed"}\n\n')
+        payload = _error_payload(events[-1])
+        self.assertIs(payload["discarded"], True)
+        self.assertIn("se descarto", payload["error"])
         mock_finalize.assert_not_called()
         mock_conv_repo.delete_by_id.assert_called_once_with(gen_db, session_id, trainee_msg_id)
         self.assertEqual(session_row.current_severity, 2.8)

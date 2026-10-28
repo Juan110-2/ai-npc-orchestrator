@@ -46,8 +46,10 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         "6. Persiste el mensaje del NPC (`role=patient`) con severidad, flags y metricas de IA.\n"
         "7. Si la sesion debe cerrarse, la finaliza y dispara la evaluacion automatica.\n\n"
         "Si la IA falla (o no se puede guardar la respuesta), el turno se descarta por completo: "
-        "se borra el mensaje del usuario, la severidad vuelve a su valor previo y se responde `502`. "
-        "Se puede reenviar el mismo mensaje sin duplicados.\n\n"
+        "se borra el mensaje del usuario (y la respuesta del paciente si llego a guardarse), la "
+        "severidad vuelve a su valor previo y se responde `502`; se puede reenviar el mismo mensaje "
+        "sin duplicados. Si ademas no se puede confirmar ese descarte se responde `500` y hay que "
+        "recargar la conversacion (`GET /{session_id}/history`) antes de reenviar.\n\n"
         "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE).\n\n"
         "Requiere JWT; solo el dueno de la sesion, `admin` o el `teacher` que la asigno pueden escribir turnos."
     ),
@@ -57,7 +59,8 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
         400: {"description": "Mensaje vacio o sesion ya cerrada"},
         404: {"description": "Sesion, perfil o escenario no encontrado"},
-        502: {"description": "La IA fallo; el turno se descarta y se puede reenviar el mensaje"},
+        500: {"description": "La IA fallo y no se pudo confirmar el descarte del turno; recargar la conversacion antes de reenviar"},
+        502: {"description": "La IA fallo; el turno se descarto y se puede reenviar el mensaje"},
     },
 )
 @limiter.limit("10/minute")
@@ -99,12 +102,17 @@ def converse(
         # Se descarta el turno completo (mensaje del estudiante y severidad) para
         # que el reintento con el mismo texto no lo duplique. Los ai_call_logs se conservan.
         logger.error("[converse] Fallo la respuesta del paciente (session=%s)", session_id, exc_info=True)
-        rollback_turn(
+        discarded = rollback_turn(
             db,
             session_id,
             trainee_msg_id=ctx.trainee_msg_id,
             previous_severity=ctx.previous_severity,
         )
+        if not discarded:
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo descartar el turno; recarga la conversacion antes de reenviar.",
+            )
         raise HTTPException(
             status_code=502,
             detail="No se pudo generar la respuesta del paciente. El turno se descarto; intenta enviar el mensaje de nuevo.",
@@ -126,9 +134,11 @@ def converse(
         "| `chunk` | `{\"chunk\": \"texto...\"}` | Fragmento de texto de la respuesta |\n"
         "| `done` | `{\"done\": true, \"severity\": 2.7, \"should_close\": false, "
         "\"closing_kind\": null, \"metrics\": {...}}` | Fin del stream con metricas |\n"
-        "| `error` | `{\"error\": \"mensaje\"}` | Error durante la generacion. El turno se descarta "
-        "(se borra el mensaje del usuario, la severidad vuelve a su valor previo y no se guarda "
-        "respuesta parcial): se puede reenviar el mismo mensaje sin duplicados |\n\n"
+        "| `error` | `{\"error\": \"mensaje\", \"discarded\": true}` | Error durante la generacion. "
+        "`discarded: true` indica que el turno se descarto (se borra el mensaje del usuario, la "
+        "severidad vuelve a su valor previo y no se guarda respuesta parcial): se puede reenviar el "
+        "mismo mensaje sin duplicados. `discarded: false` indica que no se pudo confirmar el descarte: "
+        "hay que recargar la conversacion (`GET /{session_id}/history`) antes de reenviar |\n\n"
         "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono.\n\n"
         "Requiere JWT; solo el dueno de la sesion, `admin` o el `teacher` que la asigno pueden escribir turnos."
     ),

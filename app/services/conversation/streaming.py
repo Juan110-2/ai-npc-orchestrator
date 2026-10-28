@@ -92,8 +92,19 @@ def yield_chunk_event(chunk: str) -> str:
     return f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
 
 
-def yield_error_event(message: str) -> str:
-    return f"event: error\ndata: {json.dumps({'error': message})}\n\n"
+STREAM_ERROR_DISCARDED = (
+    "No se pudo generar la respuesta del paciente. El turno se descarto; "
+    "puedes reenviar el mensaje."
+)
+STREAM_ERROR_NOT_DISCARDED = (
+    "No se pudo generar la respuesta del paciente y no se pudo confirmar que el turno "
+    "se descartara. Recarga la conversacion antes de reenviar el mensaje."
+)
+
+
+def yield_error_event(discarded: bool) -> str:
+    message = STREAM_ERROR_DISCARDED if discarded else STREAM_ERROR_NOT_DISCARDED
+    return f"event: error\ndata: {json.dumps({'error': message, 'discarded': discarded})}\n\n"
 
 
 def yield_done_event(ctx: TurnContext, state: StreamExecutionState) -> str:
@@ -203,13 +214,14 @@ def discard_failed_turn(
     gen_db: Session,
     session_id: UUID,
     ctx: TurnContext,
-) -> None:
+) -> bool:
     """Descarta el turno completo: borra el mensaje del estudiante y restaura la severidad.
 
     No se guarda la respuesta parcial del paciente. Se usa antes de emitir el
     evento error para que el turno ya este deshecho cuando el cliente reintente.
+    Devuelve si el descarte se confirmo, para reflejarlo en el campo `discarded`.
     """
-    rollback_turn(
+    return rollback_turn(
         gen_db,
         session_id,
         trainee_msg_id=ctx.trainee_msg_id,
@@ -272,8 +284,8 @@ def stream_response_generator(
         if state.stream_error is not None:
             # El turno se descarta antes de avisar: si el cliente se desconecta
             # al recibir el error, el generador ya no vuelve a ejecutarse.
-            discard_failed_turn(gen_db=gen_db, session_id=session_id, ctx=ctx)
-            yield yield_error_event(str(state.stream_error))
+            discarded = discard_failed_turn(gen_db=gen_db, session_id=session_id, ctx=ctx)
+            yield yield_error_event(discarded)
             return
 
         if ctx.should_close:
@@ -294,8 +306,8 @@ def stream_response_generator(
             ctx=ctx,
             state=state,
         ):
-            discard_failed_turn(gen_db=gen_db, session_id=session_id, ctx=ctx)
-            yield yield_error_event("DB commit failed")
+            discarded = discard_failed_turn(gen_db=gen_db, session_id=session_id, ctx=ctx)
+            yield yield_error_event(discarded)
             return
 
         finalize_and_evaluate_stream(gen_db, session_id, ctx)

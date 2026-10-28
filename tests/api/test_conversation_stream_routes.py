@@ -112,6 +112,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         )
         mock_session_local.return_value = MagicMock()
         mock_commit.return_value = True
+        mock_discard_turn.return_value = True
         expected_error = RuntimeError("provider down")
 
         def fake_iter_ai_stream(*, state, **_kwargs):
@@ -129,10 +130,12 @@ class TestConversationStreamRoutes(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: error", body)
-        self.assertIn("provider down", body)
+        error_raw = body.split("event: error\ndata: ", 1)[1].split("\n\n", 1)[0]
+        self.assertIs(json.loads(error_raw)["discarded"], True)
         mock_discard_turn.assert_called_once()
         mock_commit.assert_not_called()
 
+    @patch("app.services.conversation.streaming.discard_failed_turn", return_value=True)
     @patch("app.services.conversation.streaming.finalize_and_evaluate_stream")
     @patch("app.services.conversation.streaming.commit_stream_message", return_value=False)
     @patch("app.services.conversation.streaming.SessionLocal")
@@ -147,6 +150,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         mock_session_local,
         _mock_commit,
         mock_finalize,
+        _mock_discard_turn,
     ):
         session = make_session()
         override_session_access(session)
@@ -167,6 +171,46 @@ class TestConversationStreamRoutes(unittest.TestCase):
             body = "".join(response.iter_text())
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('event: error\ndata: {"error": "DB commit failed"}', body)
+        error_raw = body.split("event: error\ndata: ", 1)[1].split("\n\n", 1)[0]
+        self.assertIs(json.loads(error_raw)["discarded"], True)
         self.assertNotIn("event: done", body)
         mock_finalize.assert_not_called()
+
+    @patch("app.services.conversation.streaming.discard_failed_turn", return_value=False)
+    @patch("app.services.conversation.streaming.commit_stream_message", return_value=False)
+    @patch("app.services.conversation.streaming.SessionLocal")
+    @patch("app.api.v1.routes.conversation.build_stream_inputs")
+    @patch("app.api.v1.routes.conversation.process_turn")
+    @patch("app.api.v1.routes.conversation.resolve_session_context")
+    def test_converse_stream_error_event_reports_discarded_false_when_rollback_fails(
+        self,
+        mock_resolve,
+        mock_process_turn,
+        mock_build_stream_inputs,
+        mock_session_local,
+        _mock_commit,
+        _mock_discard_turn,
+    ):
+        session = make_session()
+        override_session_access(session)
+        mock_resolve.return_value = (session, SimpleNamespace(), SimpleNamespace())
+        mock_process_turn.return_value = _make_ctx()
+        mock_build_stream_inputs.return_value = StreamInputs(
+            system_prompt=None,
+            effective_user_input="hola",
+            forced_text="respuesta corta",
+        )
+        mock_session_local.return_value = MagicMock()
+
+        with self.client.stream(
+            "POST",
+            f"/conversation/{session.id}/stream",
+            json={"content": "hola"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+        error_raw = body.split("event: error\ndata: ", 1)[1].split("\n\n", 1)[0]
+        payload = json.loads(error_raw)
+        self.assertIs(payload["discarded"], False)
+        self.assertIn("Recarga la conversacion", payload["error"])
+        self.assertNotIn("event: done", body)
