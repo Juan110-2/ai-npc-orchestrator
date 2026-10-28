@@ -28,11 +28,11 @@ def _ensure_staff_session_access(db: Session, user: UserProfile, session_id: UUI
     """Carga la sesión (404 si no existe) y exige que el staff pueda acceder a ella (403 si no)."""
     session = SessionRepository.get_by_id(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
     if not can_access_session(user.role, user.id, session):
         raise HTTPException(
             status_code=403,
-            detail="Solo el docente que asigno la sesion o un admin puede acceder a esta evaluacion",
+            detail="Solo el docente que asignó la sesión o un admin puede acceder a esta evaluación",
         )
     return session
 
@@ -275,7 +275,7 @@ def run_auto(
     _ensure_staff_session_access(db, user, session_id)
     ev = run_auto_evaluation(db, session_id)
     if not ev:
-        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
     return _serialize_evaluation(db, ev)
 
 
@@ -304,7 +304,7 @@ def get_evaluation(
     session = SessionRepository.get_by_id(db, session_id)
 
     if ev is None and session is None:
-        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
     user_id = get_subject_id(payload)
     owner_id = ev.student_id if ev is not None else getattr(session, "user_id", None)
@@ -315,17 +315,17 @@ def get_evaluation(
         if not allowed:
             raise HTTPException(
                 status_code=403,
-                detail="Solo el dueno de la sesion, un admin o el docente que la asigno puede ver esta evaluacion",
+                detail="Solo el dueño de la sesión, un admin o el docente que la asignó puede ver esta evaluación",
             )
 
     if not ev:
         ev = run_auto_evaluation(db, session_id)
         if not ev:
             logger.warning(
-                "[evaluation] No se pudo generar evaluacion automatica para session_id=%s",
+                "[evaluation] No se pudo generar evaluación automatica para session_id=%s",
                 session_id,
             )
-            raise HTTPException(status_code=404, detail="Sesion no encontrada")
+            raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
     return _serialize_evaluation(db, ev)
 

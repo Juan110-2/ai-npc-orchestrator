@@ -93,12 +93,12 @@ def yield_chunk_event(chunk: str) -> str:
 
 
 STREAM_ERROR_DISCARDED = (
-    "No se pudo generar la respuesta del paciente. El turno se descarto; "
+    "No se pudo generar la respuesta del paciente. El turno se descartó; "
     "puedes reenviar el mensaje."
 )
 STREAM_ERROR_NOT_DISCARDED = (
     "No se pudo generar la respuesta del paciente y no se pudo confirmar que el turno "
-    "se descartara. Recarga la conversacion antes de reenviar el mensaje."
+    "se descartara. Recarga la conversación antes de reenviar el mensaje."
 )
 
 

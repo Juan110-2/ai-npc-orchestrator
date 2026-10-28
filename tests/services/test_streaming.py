@@ -142,7 +142,7 @@ class TestStreamingConversation(unittest.TestCase):
         self.assertTrue(events[-1].startswith("event: error"))
         payload = _error_payload(events[-1])
         self.assertIs(payload["discarded"], True)
-        self.assertIn("se descarto", payload["error"])
+        self.assertIn("se descartó", payload["error"])
         # Se borra el mensaje trainee del turno y se restaura la severidad previa
         mock_conv_repo.delete_by_id.assert_called_once_with(gen_db, session_id, trainee_msg_id)
         self.assertEqual(session_row.current_severity, 2.8)
@@ -190,7 +190,7 @@ class TestStreamingConversation(unittest.TestCase):
         self.assertEqual(len(events), 1)
         payload = _error_payload(events[0])
         self.assertIs(payload["discarded"], False)
-        self.assertIn("Recarga la conversacion", payload["error"])
+        self.assertIn("Recarga la conversación", payload["error"])
         mock_finalize.assert_not_called()
 
     @patch("app.services.conversation.streaming.finalize_and_evaluate_stream")
@@ -228,7 +228,7 @@ class TestStreamingConversation(unittest.TestCase):
 
         payload = _error_payload(events[-1])
         self.assertIs(payload["discarded"], True)
-        self.assertIn("se descarto", payload["error"])
+        self.assertIn("se descartó", payload["error"])
         mock_finalize.assert_not_called()
         mock_conv_repo.delete_by_id.assert_called_once_with(gen_db, session_id, trainee_msg_id)
         self.assertEqual(session_row.current_severity, 2.8)

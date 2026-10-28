@@ -33,7 +33,7 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
     response_model=ConversationMessageResponse,
     summary="Enviar mensaje (sincrono)",
     description=(
-        "Procesa un turno de conversacion con el personaje simulado (NPC) y devuelve "
+        "Procesa un turno de conversación con el personaje simulado (NPC) y devuelve "
         "la respuesta completa cuando esta lista.\n\n"
         "**Flujo interno por turno:**\n"
         "1. Persiste el mensaje del usuario (`role=trainee`).\n"
@@ -44,23 +44,23 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
         "o abuso reiterado).\n"
         "5. Genera la respuesta del NPC via el proveedor de IA activo.\n"
         "6. Persiste el mensaje del NPC (`role=patient`) con severidad, flags y metricas de IA.\n"
-        "7. Si la sesion debe cerrarse, la finaliza y dispara la evaluacion automatica.\n\n"
+        "7. Si la sesión debe cerrarse, la finaliza y dispara la evaluación automatica.\n\n"
         "Si la IA falla (o no se puede guardar la respuesta), el turno se descarta por completo: "
         "se borra el mensaje del usuario (y la respuesta del paciente si llego a guardarse), la "
         "severidad vuelve a su valor previo y se responde `502`; se puede reenviar el mismo mensaje "
         "sin duplicados. Si ademas no se puede confirmar ese descarte se responde `500` y hay que "
-        "recargar la conversacion (`GET /{session_id}/history`) antes de reenviar.\n\n"
+        "recargar la conversación (`GET /{session_id}/history`) antes de reenviar.\n\n"
         "Usa `POST /{session_id}/stream` si necesitas respuesta en tiempo real (SSE).\n\n"
-        "Requiere JWT; solo quien realiza la sesion (su dueno) puede escribir turnos: `admin` y el `teacher` que la asigno pueden verla pero no escribir en ella."
+        "Requiere JWT; solo quien realiza la sesión (su dueño) puede escribir turnos: `admin` y el `teacher` que la asignó pueden verla pero no escribir en ella."
     ),
     response_description="Mensaje del personaje simulado (NPC) con severidad y metricas de IA.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "Solo quien realiza la sesion puede escribir en ella (tampoco `admin` ni el `teacher` que la asigno)"},
-        400: {"description": "Mensaje vacio o sesion ya cerrada"},
-        404: {"description": "Sesion, perfil o escenario no encontrado"},
-        500: {"description": "La IA fallo y no se pudo confirmar el descarte del turno; recargar la conversacion antes de reenviar"},
-        502: {"description": "La IA fallo; el turno se descarto y se puede reenviar el mensaje"},
+        403: {"description": "Solo quien realiza la sesión puede escribir en ella (tampoco `admin` ni el `teacher` que la asignó)"},
+        400: {"description": "Mensaje vacío o sesión ya cerrada"},
+        404: {"description": "Sesión, perfil o escenario no encontrado"},
+        500: {"description": "La IA falló y no se pudo confirmar el descarte del turno; recargar la conversación antes de reenviar"},
+        502: {"description": "La IA falló; el turno se descartó y se puede reenviar el mensaje"},
     },
 )
 @limiter.limit("10/minute")
@@ -111,11 +111,11 @@ def converse(
         if not discarded:
             raise HTTPException(
                 status_code=500,
-                detail="No se pudo descartar el turno; recarga la conversacion antes de reenviar.",
+                detail="No se pudo descartar el turno; recarga la conversación antes de reenviar.",
             )
         raise HTTPException(
             status_code=502,
-            detail="No se pudo generar la respuesta del paciente. El turno se descarto; intenta enviar el mensaje de nuevo.",
+            detail="No se pudo generar la respuesta del paciente. El turno se descartó; intenta enviar el mensaje de nuevo.",
         )
     finalize_and_evaluate_sync(session, ctx, db)
     return patient_msg
@@ -135,19 +135,19 @@ def converse(
         "| `done` | `{\"done\": true, \"severity\": 2.7, \"should_close\": false, "
         "\"closing_kind\": null, \"metrics\": {...}}` | Fin del stream con metricas |\n"
         "| `error` | `{\"error\": \"mensaje\", \"discarded\": true}` | Error durante la generacion. "
-        "`discarded: true` indica que el turno se descarto (se borra el mensaje del usuario, la "
+        "`discarded: true` indica que el turno se descartó (se borra el mensaje del usuario, la "
         "severidad vuelve a su valor previo y no se guarda respuesta parcial): se puede reenviar el "
         "mismo mensaje sin duplicados. `discarded: false` indica que no se pudo confirmar el descarte: "
-        "hay que recargar la conversacion (`GET /{session_id}/history`) antes de reenviar |\n\n"
+        "hay que recargar la conversación (`GET /{session_id}/history`) antes de reenviar |\n\n"
         "La logica de heuristica, severidad y cierre automatico es identica al endpoint sincrono.\n\n"
-        "Requiere JWT; solo quien realiza la sesion (su dueno) puede escribir turnos: `admin` y el `teacher` que la asigno pueden verla pero no escribir en ella."
+        "Requiere JWT; solo quien realiza la sesión (su dueño) puede escribir turnos: `admin` y el `teacher` que la asignó pueden verla pero no escribir en ella."
     ),
     response_description="Stream SSE (`text/event-stream`) con chunks de texto y evento `done` final.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "Solo quien realiza la sesion puede escribir en ella (tampoco `admin` ni el `teacher` que la asigno)"},
-        400: {"description": "Mensaje vacio o sesion ya cerrada"},
-        404: {"description": "Sesion, perfil o escenario no encontrado"},
+        403: {"description": "Solo quien realiza la sesión puede escribir en ella (tampoco `admin` ni el `teacher` que la asignó)"},
+        400: {"description": "Mensaje vacío o sesión ya cerrada"},
+        404: {"description": "Sesión, perfil o escenario no encontrado"},
     },
 )
 @limiter.limit("10/minute")
@@ -179,18 +179,18 @@ def converse_stream(
 @router.get(
     "/{session_id}/history",
     response_model=list[ConversationMessageResponse],
-    summary="Obtener historial de conversacion",
+    summary="Obtener historial de conversación",
     description=(
-        "Devuelve la transcripcion completa de una sesion, ordenada cronologicamente. "
+        "Devuelve la transcripción completa de una sesión, ordenada cronológicamente. "
         "Incluye todos los mensajes del usuario (`role=trainee`) y del personaje simulado "
         "(`role=patient`), con su severidad registrada, flags conductuales y metricas de IA. "
-        "Requiere ser el dueno de la sesion, `admin` o el `teacher` que la asigno."
+        "Requiere ser el dueño de la sesión, `admin` o el `teacher` que la asignó."
     ),
-    response_description="Lista completa de mensajes de la sesion en orden cronologico.",
+    response_description="Lista completa de mensajes de la sesión en orden cronológico.",
     responses={
         401: {"description": "Token ausente o invalido"},
-        403: {"description": "La sesion no es del usuario, ni la asigno (`teacher`), y no es `admin`"},
-        404: {"description": "Sesion no encontrada"},
+        403: {"description": "La sesión no es del usuario, ni la asignó (`teacher`), y no es `admin`"},
+        404: {"description": "Sesión no encontrada"},
     },
 )
 def get_conversation_history(

@@ -212,5 +212,5 @@ class TestConversationStreamRoutes(unittest.TestCase):
         error_raw = body.split("event: error\ndata: ", 1)[1].split("\n\n", 1)[0]
         payload = json.loads(error_raw)
         self.assertIs(payload["discarded"], False)
-        self.assertIn("Recarga la conversacion", payload["error"])
+        self.assertIn("Recarga la conversación", payload["error"])
         self.assertNotIn("event: done", body)

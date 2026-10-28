@@ -98,7 +98,7 @@ class TestConversationRoutes(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 502)
-        self.assertIn("turno se descarto", response.json()["detail"])
+        self.assertIn("turno se descartó", response.json()["detail"])
         mock_rollback.assert_called_once_with(
             self.db,
             session.id,
@@ -138,7 +138,7 @@ class TestConversationRoutes(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 500)
-        self.assertIn("recarga la conversacion", response.json()["detail"])
+        self.assertIn("recarga la conversación", response.json()["detail"])
         mock_rollback.assert_called_once()
         mock_persist.assert_not_called()
         mock_finalize.assert_not_called()
