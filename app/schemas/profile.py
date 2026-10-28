@@ -46,8 +46,8 @@ class ProfileCreate(BaseModel):
         default_factory=dict,
         description=(
             "Comportamiento conversacional: `behavior_min` y `behavior_max` definen el rango de "
-            "severidad emocional permitido (0 a 5). `triggers` suben severidad; "
-            "`regulators` la bajan."
+            "severidad emocional permitido (0 a 5). `triggers` y `regulators` se guardan "
+            "con el perfil, pero el motor de conversación aún no los usa (mejora futura)."
         ),
         examples=[_BEHAVIOR_EXAMPLE],
     )
