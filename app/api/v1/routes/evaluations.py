@@ -9,7 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import can_access_session, get_db, get_subject_id, get_user_role, require_staff
+from app.api.v1.deps import (
+    STAFF_ROLES,
+    can_access_session,
+    get_db,
+    get_subject_id,
+    get_user_role,
+    require_staff,
+)
 from app.core.auth import verify_supabase_jwt
 from app.models.user_profile import UserProfile
 from app.repositories.evaluations_repository import EvaluationsRepository, RubricsRepository
@@ -57,6 +64,16 @@ def _evaluation_visibility_filter(role: str, user_id: UUID):
             SessionModel.assigned_by == user_id,
         )
     return SessionEvaluation.student_id == user_id
+
+
+def _hides_teacher_grade(role: str, status_value: str) -> bool:
+    """
+    Indica si debe ocultarse la calificación del docente a quien consulta.
+
+    El estudiante (rol que no es de staff) no ve puntajes ni retroalimentación mientras la
+    evaluación siga en borrador; `admin` y `teacher` ven siempre todo.
+    """
+    return role not in STAFF_ROLES and status_value == "draft"
 
 
 class TeacherEvaluationInput(BaseModel):
@@ -200,9 +217,10 @@ class StudentEvaluationHistoryItemResponse(BaseModel):
     }
 
 
-def _serialize_evaluation(db: Session, ev) -> EvaluationResponse:
+def _serialize_evaluation(db: Session, ev, *, hide_grade: bool = False) -> EvaluationResponse:
+    """Serializa la evaluación; con `hide_grade` omite puntajes, retroalimentación y puntaje global."""
     overall = None
-    if ev.scores and ev.rubric_id:
+    if not hide_grade and ev.scores and ev.rubric_id:
         rubric = RubricsRepository.get_by_id(db, ev.rubric_id)
         if rubric:
             overall = compute_overall_score(ev.scores, rubric.criteria)
@@ -214,8 +232,8 @@ def _serialize_evaluation(db: Session, ev) -> EvaluationResponse:
         rubric_id=str(ev.rubric_id) if ev.rubric_id else None,
         status=ev.status,
         automatic_metrics=ev.automatic_metrics or {},
-        scores=ev.scores or {},
-        teacher_feedback=ev.teacher_feedback,
+        scores={} if hide_grade else (ev.scores or {}),
+        teacher_feedback=None if hide_grade else ev.teacher_feedback,
         overall_score=overall,
         created_at=ev.created_at.isoformat() if ev.created_at else None,
         updated_at=ev.updated_at.isoformat() if ev.updated_at else None,
@@ -286,9 +304,13 @@ def run_auto(
     description=(
         "Devuelve la evaluación completa de una sesión. "
         "Si aún no existe, puede generarse automáticamente con métricas base.\n\n"
-        "Solo el dueño de la sesión, `admin` (cualquiera) o el `teacher` que la asignó."
+        "Solo el dueño de la sesión, `admin` (cualquiera) o el `teacher` que la asignó.\n\n"
+        "Mientras la evaluación esté en borrador (`status = draft`), el estudiante recibe `scores` vacío, "
+        "`teacher_feedback` y `overall_score` en `null`; las métricas automáticas sí son visibles "
+        "y el `status` permanece en `draft` para indicar que la calificación está pendiente. "
+        "`admin` y `teacher` ven siempre todo."
     ),
-    response_description="Evaluación de la sesión con métricas automáticas y scores de rúbrica.",
+    response_description="Evaluación de la sesión con métricas automáticas y scores de rúbrica (ocultos al estudiante en borrador).",
     responses={
         401: {"description": "Token no enviado o inválido"},
         403: {"description": "El usuario no es dueño de la sesión, ni admin, ni el `teacher` que la asignó"},
@@ -307,9 +329,9 @@ def get_evaluation(
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
     user_id = get_subject_id(payload)
+    role = get_user_role(db, user_id)
     owner_id = ev.student_id if ev is not None else getattr(session, "user_id", None)
     if owner_id != user_id:
-        role = get_user_role(db, user_id)
         # Sin sesión (evaluación huérfana) no se puede comprobar quién la asignó: solo admin.
         allowed = role == "admin" if session is None else can_access_session(role, user_id, session)
         if not allowed:
@@ -327,7 +349,7 @@ def get_evaluation(
             )
             raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
-    return _serialize_evaluation(db, ev)
+    return _serialize_evaluation(db, ev, hide_grade=_hides_teacher_grade(role, ev.status))
 
 
 @router.put(
@@ -381,7 +403,9 @@ def submit_teacher_evaluation(
         "Devuelve la lista de evaluaciones para la vista principal del módulo de evaluación. "
         "Permite filtrar por una o varias sesiones con `session_ids`. "
         "Los estudiantes solo ven sus propias evaluaciones; el `teacher` las de sesiones propias "
-        "o que asignó; `admin` ve todas."
+        "o que asignó; `admin` ve todas.\n\n"
+        "Para el estudiante, las evaluaciones en borrador (`status = draft`) llevan `scores` vacío: "
+        "la calificación del docente se muestra solo cuando deja de ser borrador."
     ),
     response_description="Lista de evaluaciones con datos de sesión y estudiante.",
     responses={401: {"description": "Token no enviado o inválido"}},
@@ -414,7 +438,8 @@ def list_evaluations(
         .order_by(desc(SessionEvaluation.created_at))
     )
 
-    visibility = _evaluation_visibility_filter(get_user_role(db, user_id), user_id)
+    role = get_user_role(db, user_id)
+    visibility = _evaluation_visibility_filter(role, user_id)
     if visibility is not None:
         q = q.filter(visibility)
 
@@ -436,7 +461,7 @@ def list_evaluations(
             "started_at": s.started_at.isoformat() if s and s.started_at else None,
             "ended_at": s.ended_at.isoformat() if s and s.ended_at else None,
             "automatic_metrics": e.automatic_metrics or {},
-            "scores": e.scores or {},
+            "scores": {} if _hides_teacher_grade(role, e.status) else (e.scores or {}),
             "submitted_at": e.submitted_at.isoformat() if e.submitted_at else None,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         })
@@ -451,6 +476,8 @@ def list_evaluations(
         "Devuelve el historial de evaluaciones de un estudiante específico. "
         "Los estudiantes solo pueden consultar su propio historial. El `teacher` ve de otro estudiante "
         "únicamente las evaluaciones de las sesiones que asignó; `admin` ve todas.\n\n"
+        "Para el estudiante, las evaluaciones en borrador (`status = draft`) llevan `scores` vacío y "
+        "`teacher_feedback` en `null`: la calificación del docente se muestra solo cuando deja de ser borrador.\n\n"
         "Requiere ser el propio estudiante o tener rol `teacher` o `admin`."
     ),
     response_description="Lista de evaluaciones del estudiante con métricas y feedback.",
@@ -465,9 +492,9 @@ def list_student_evaluations(
     payload: dict = Depends(verify_supabase_jwt),
 ):
     user_id = get_subject_id(payload)
+    role = get_user_role(db, user_id)
     assigned_by = None
     if user_id != student_id:
-        role = get_user_role(db, user_id)
         if role == "teacher":
             assigned_by = user_id
         elif role != "admin":
@@ -483,8 +510,8 @@ def list_student_evaluations(
             "session_id": str(e.session_id),
             "status": e.status,
             "automatic_metrics": e.automatic_metrics or {},
-            "scores": e.scores or {},
-            "teacher_feedback": e.teacher_feedback,
+            "scores": {} if _hides_teacher_grade(role, e.status) else (e.scores or {}),
+            "teacher_feedback": None if _hides_teacher_grade(role, e.status) else e.teacher_feedback,
             "submitted_at": e.submitted_at.isoformat() if e.submitted_at else None,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
