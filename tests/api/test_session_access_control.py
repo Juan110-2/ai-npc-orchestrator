@@ -20,7 +20,8 @@ class TestSessionAccessControl(unittest.TestCase):
         self.db = MagicMock()
         self.client = build_client(self.db)
         self.owner_id = uuid4()
-        self.session = make_session(user_id=self.owner_id)
+        self.teacher_id = uuid4()
+        self.session = make_session(user_id=self.owner_id, assigned_by=self.teacher_id)
         self.other_id = uuid4()
         self.users: dict = {}
 
@@ -107,8 +108,37 @@ class TestSessionAccessControl(unittest.TestCase):
 
     def test_teacher_can_read_session_without_owner(self):
         self.session.user_id = None
-        self._login_as("teacher")
+        self._login_as("teacher", self.teacher_id)
         self.assertEqual(self.client.get(f"/sessions/{self.session.id}").status_code, 200)
+
+    def test_teacher_who_did_not_assign_gets_403(self):
+        self._login_as("teacher")
+        for method, url, body in self._routes():
+            with self.subTest(route=f"{method} {url}"):
+                self.assertEqual(self._call(method, url, body).status_code, 403)
+
+    def test_teacher_cannot_read_session_without_assigner(self):
+        self.session.assigned_by = None
+        self._login_as("teacher")
+        self.assertEqual(self.client.get(f"/sessions/{self.session.id}").status_code, 403)
+
+    def test_teacher_owner_can_read_session_assigned_by_someone_else(self):
+        teacher_id = self._login_as("teacher")
+        self.session.user_id = teacher_id
+        self.assertEqual(self.client.get(f"/sessions/{self.session.id}").status_code, 200)
+
+    def test_assigner_teacher_does_not_see_other_teachers_session(self):
+        # Ser teacher de otra sesión no abre ésta: la regla es por sesión, no por rol.
+        other_session = make_session(user_id=uuid4(), assigned_by=uuid4())
+        self._login_as("teacher", self.teacher_id)
+        with patch(f"{_DEPS}.SessionRepository.get_by_id", return_value=other_session):
+            self.assertEqual(self.client.get(f"/sessions/{other_session.id}").status_code, 403)
+
+    def test_missing_session_returns_404_for_every_role(self):
+        for role in ("student", "teacher", "admin"):
+            with self.subTest(role=role):
+                self._login_as(role)
+                self.assertEqual(self.client.get(f"/sessions/{uuid4()}").status_code, 404)
 
     def test_missing_session_returns_404(self):
         self._login_as("student")
@@ -121,7 +151,7 @@ class TestSessionAccessControl(unittest.TestCase):
     def test_owner_teacher_and_admin_can_get_session(self):
         for role, user_id in (
             ("student", self.owner_id),
-            ("teacher", None),
+            ("teacher", self.teacher_id),
             ("admin", None),
         ):
             with self.subTest(role=role):
@@ -133,7 +163,7 @@ class TestSessionAccessControl(unittest.TestCase):
     @patch("app.api.v1.routes.sessions.SessionRepository.add_time_delta")
     def test_flush_time_allowed_for_owner_and_staff(self, mock_add):
         mock_add.return_value = self.session
-        for role, user_id in (("student", self.owner_id), ("teacher", None), ("admin", None)):
+        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id), ("admin", None)):
             with self.subTest(role=role):
                 self._login_as(role, user_id)
                 for method in ("patch", "post"):
@@ -142,7 +172,7 @@ class TestSessionAccessControl(unittest.TestCase):
 
     @patch("app.api.v1.routes.sessions._run_post_close_hooks")
     def test_end_session_allowed_for_owner_and_staff(self, _mock_hooks):
-        for role, user_id in (("student", self.owner_id), ("teacher", None), ("admin", None)):
+        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id), ("admin", None)):
             with self.subTest(role=role):
                 self.session.ended_at = None
                 self._login_as(role, user_id)
@@ -152,7 +182,7 @@ class TestSessionAccessControl(unittest.TestCase):
     @patch("app.api.v1.routes.conversation.ConversationRepository.list_by_session")
     def test_history_allowed_for_owner_and_staff(self, mock_list):
         mock_list.return_value = [make_message(session_id=self.session.id)]
-        for role, user_id in (("student", self.owner_id), ("teacher", None), ("admin", None)):
+        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id), ("admin", None)):
             with self.subTest(role=role):
                 self._login_as(role, user_id)
                 response = self.client.get(f"/conversation/{self.session.id}/history")
@@ -179,7 +209,7 @@ class TestSessionAccessControl(unittest.TestCase):
             latency_ms=1.0,
         )
         mock_persist.return_value = make_message(session_id=self.session.id)
-        for role, user_id in (("student", self.owner_id), ("teacher", None), ("admin", None)):
+        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id), ("admin", None)):
             with self.subTest(role=role):
                 self._login_as(role, user_id)
                 response = self.client.post(f"/conversation/{self.session.id}", json={"content": "hola"})
@@ -201,7 +231,7 @@ class TestSessionAccessControl(unittest.TestCase):
         mock_process.return_value = _make_ctx()
         mock_build.return_value = StreamInputs(system_prompt=None, effective_user_input="hola", forced_text="hola")
         mock_session_local.return_value = MagicMock()
-        for role, user_id in (("student", self.owner_id), ("teacher", None)):
+        for role, user_id in (("student", self.owner_id), ("teacher", self.teacher_id)):
             with self.subTest(role=role):
                 self._login_as(role, user_id)
                 with self.client.stream(
@@ -333,3 +363,40 @@ class TestSessionAccessControl(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 201)
                 self.assertEqual(mock_start.call_args.kwargs["user_id"], self.other_id)
+
+
+class TestCanAccessSession(unittest.TestCase):
+    def setUp(self):
+        self.owner = uuid4()
+        self.assigner = uuid4()
+        self.session = make_session(user_id=self.owner, assigned_by=self.assigner)
+
+    def _can(self, role, user_id):
+        from app.api.v1.deps import can_access_session
+
+        return can_access_session(role, user_id, self.session)
+
+    def test_owner_has_access_with_any_role(self):
+        for role in ("student", "teacher", "admin", "otro"):
+            with self.subTest(role=role):
+                self.assertTrue(self._can(role, self.owner))
+
+    def test_admin_has_access_to_any_session(self):
+        self.assertTrue(self._can("admin", uuid4()))
+
+    def test_teacher_only_with_sessions_they_assigned(self):
+        self.assertTrue(self._can("teacher", self.assigner))
+        self.assertFalse(self._can("teacher", uuid4()))
+
+    def test_student_that_assigned_the_session_has_no_access(self):
+        self.assertFalse(self._can("student", self.assigner))
+
+    def test_unknown_roles_have_no_access(self):
+        self.assertFalse(self._can("otro", uuid4()))
+
+    def test_session_without_owner_or_assigner(self):
+        self.session.user_id = None
+        self.session.assigned_by = None
+        self.assertFalse(self._can("student", uuid4()))
+        self.assertFalse(self._can("teacher", uuid4()))
+        self.assertTrue(self._can("admin", uuid4()))

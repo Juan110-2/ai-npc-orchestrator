@@ -74,6 +74,22 @@ def get_subject_id(payload: dict) -> UUID:
         )
 
 
+def can_access_session(role: str, user_id: UUID, session) -> bool:
+    """
+    Si el usuario puede acceder a una sesión concreta (y a su evaluación).
+
+    - El dueño de la sesión (`session.user_id`): sí.
+    - `admin`: cualquier sesión.
+    - `teacher`: solo las que asignó (`session.assigned_by`); las propias entran como dueño.
+    - `student` u otro rol: solo las suyas.
+    """
+    if session.user_id is not None and session.user_id == user_id:
+        return True
+    if role == "admin":
+        return True
+    return role == "teacher" and session.assigned_by is not None and session.assigned_by == user_id
+
+
 def require_session_access(
     session_id: UUID,
     db=Depends(get_db),
@@ -82,8 +98,8 @@ def require_session_access(
     """
     Exige JWT válido y autoriza el acceso a una sesión concreta.
 
-    Se permite al dueño de la sesión o a `teacher` y `admin`.
-    Sesión inexistente -> 404; cualquier otro caso -> 403.
+    Se permite al dueño de la sesión, a `admin` (cualquiera) y a `teacher` solo en las
+    sesiones que asignó (`assigned_by`). Sesión inexistente -> 404; cualquier otro caso -> 403.
     Retorna la sesión para reutilizarla en la ruta.
     """
     user_id = get_subject_id(payload)
@@ -94,7 +110,7 @@ def require_session_access(
     if session.user_id is not None and session.user_id == user_id:
         return session
 
-    if get_user_role(db, user_id) not in STAFF_ROLES:
+    if not can_access_session(get_user_role(db, user_id), user_id, session):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes acceso a esta sesión",
