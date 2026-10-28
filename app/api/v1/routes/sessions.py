@@ -218,11 +218,11 @@ class EndSessionResponse(BaseModel):
     summary="Listar sesiones",
     description=(
         "Devuelve sesiones paginadas con filtrado por rol:\n\n"
-        "- `admin`: por defecto todas las sesiones; `view=mine` las que inició él; `view=assigned` las de sus "
+        "- `admin`: por defecto todas las sesiones; `view=mine` sus propias sesiones; `view=assigned` las de sus "
         "estudiantes (las que él les asignó).\n"
-        "- `teacher`: por defecto las sesiones que inició él (para probar sus casos); `view=assigned` las de sus "
-        "estudiantes, es decir, las sesiones que él les asignó. No ve las sesiones que otros docentes asignaron, "
-        "aunque sean del mismo estudiante.\n"
+        "- `teacher`: por defecto sus propias sesiones, es decir, las que él mismo realiza (de prueba o no); "
+        "`view=assigned` las de sus estudiantes, es decir, las sesiones que él les asignó. No ve las sesiones que "
+        "otros docentes asignaron, aunque sean del mismo estudiante.\n"
         "- `student`: siempre solo sus propias sesiones.\n\n"
         "El parámetro `status` filtra por estado: `active`, `completed` o `terminated`.\n\n"
         "Requiere JWT."
@@ -236,8 +236,8 @@ def list_sessions(
     view: Optional[str] = Query(
         None,
         description=(
-            "Filtro de vista: `mine` (las sesiones que inició el propio usuario; para `admin`, en lugar de "
-            "todas) o `assigned` (las de sus estudiantes: las que el `teacher` o `admin` les asignó, nunca las "
+            "Filtro de vista: `mine` (las sesiones propias, que el usuario realiza él mismo; para `admin`, en "
+            "lugar de todas) o `assigned` (las de sus estudiantes: las que el `teacher` o `admin` les asignó, nunca las "
             "asignadas por otros docentes). Un `student` siempre ve solo las propias."
         ),
     ),
