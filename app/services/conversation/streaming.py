@@ -12,6 +12,7 @@ from app.services.conversation.core import (
     commit_with_rollback,
     finalize_session_in_generator,
     persist_patient_message,
+    rollback_turn,
     run_auto_evaluation_safely,
 )
 from app.services.conversation.models import StreamExecutionState, StreamInputs, TurnContext
@@ -197,30 +198,23 @@ def persist_stream_message(
     )
 
 
-def handle_stream_error_persistence(
+def discard_failed_turn(
     *,
     gen_db: Session,
     session_id: UUID,
     ctx: TurnContext,
-    state: StreamExecutionState,
 ) -> None:
-    if not state.accumulated.strip():
-        return
-    try:
-        persist_stream_message(
-            gen_db=gen_db,
-            session_id=session_id,
-            ctx=ctx,
-            state=state,
-        )
-        commit_with_rollback(
-            gen_db,
-            "[converse_stream] Fallo persistencia del parcial tras error (session=%s)",
-            session_id,
-            reraise=True,
-        )
-    except Exception:
-        logger.error("[converse_stream] Fallo persistencia del parcial tras error", exc_info=True)
+    """Descarta el turno completo: borra el mensaje del estudiante y restaura la severidad.
+
+    No se guarda la respuesta parcial del paciente. Se usa antes de emitir el
+    evento error para que el turno ya este deshecho cuando el cliente reintente.
+    """
+    rollback_turn(
+        gen_db,
+        session_id,
+        trainee_msg_id=ctx.trainee_msg_id,
+        previous_severity=ctx.previous_severity,
+    )
 
 
 def commit_stream_message(
@@ -276,13 +270,10 @@ def stream_response_generator(
             )
 
         if state.stream_error is not None:
+            # El turno se descarta antes de avisar: si el cliente se desconecta
+            # al recibir el error, el generador ya no vuelve a ejecutarse.
+            discard_failed_turn(gen_db=gen_db, session_id=session_id, ctx=ctx)
             yield yield_error_event(str(state.stream_error))
-            handle_stream_error_persistence(
-                gen_db=gen_db,
-                session_id=session_id,
-                ctx=ctx,
-                state=state,
-            )
             return
 
         if ctx.should_close:
@@ -303,6 +294,7 @@ def stream_response_generator(
             ctx=ctx,
             state=state,
         ):
+            discard_failed_turn(gen_db=gen_db, session_id=session_id, ctx=ctx)
             yield yield_error_event("DB commit failed")
             return
 

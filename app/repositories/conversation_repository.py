@@ -40,6 +40,18 @@ class ConversationRepository:
         return msg
 
     @staticmethod
+    def delete_by_id(db: Session, session_id, message_id) -> int:
+        """Borra un mensaje de la sesion sin confirmar la transaccion (lo hace el caller)."""
+        return (
+            db.query(ConversationMessage)
+            .filter(
+                ConversationMessage.id == message_id,
+                ConversationMessage.session_id == session_id,
+            )
+            .delete(synchronize_session=False)
+        )
+
+    @staticmethod
     def list_by_session(db: Session, session_id) -> list[ConversationMessage]:
         return (
             db.query(ConversationMessage)

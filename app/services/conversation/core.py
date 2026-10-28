@@ -359,6 +359,41 @@ def finalize_session_in_generator(gen_db: Session, session_id: UUID, ctx: TurnCo
     finalize_session_time_safely(gen_db, session, source="finalize_session_in_generator")
 
 
+def rollback_turn(
+    db: Session,
+    session_id: UUID,
+    *,
+    trainee_msg_id: UUID | None,
+    previous_severity: float | None,
+) -> bool:
+    """Deshace un turno que no se pudo completar (fallo de la IA o del commit final).
+
+    Borra el mensaje trainee del turno y devuelve current_severity a su valor
+    previo, en una sola transaccion, para que reenviar el mismo mensaje no
+    duplique el texto del estudiante ni aplique la severidad dos veces.
+    El resto de la sesion (status, ended_at, base_severity, tiempo) no se toca
+    porque el cierre solo se aplica despues de guardar la respuesta del paciente.
+    Los registros de ai_call_logs se conservan. Nunca lanza: devuelve False si
+    no pudo deshacer, para que el caller siempre pueda avisar del error.
+    """
+    if trainee_msg_id is None and previous_severity is None:
+        return False
+    try:
+        db.rollback()
+        if trainee_msg_id is not None:
+            ConversationRepository.delete_by_id(db, session_id, trainee_msg_id)
+        if previous_severity is not None:
+            session = SessionRepository.get_by_id(db, session_id)
+            if session is not None:
+                session.current_severity = previous_severity
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        logger.error("[rollback_turn] No se pudo deshacer el turno (session=%s)", session_id, exc_info=True)
+        return False
+
+
 def process_turn(session, profile, user_input: str, db: Session) -> TurnContext:
     try:
         return _process_turn_inner(session, profile, user_input, db)
@@ -391,19 +426,31 @@ def _process_turn_inner(session, profile, user_input: str, db: Session) -> TurnC
     trainee_msg_id: UUID = trainee_msg.id
     db.commit()
 
-    decision, impact = fetch_parallel_inputs(
-        session.id,
-        previous_severity,
-        user_input,
-        trainee_msg_id,
-    )
-    apply_severity(session, decision, impact, profile, db)
-    final_severity = float(session.current_severity)
-    context_history = ConversationRepository.list_recent_by_session(
-        db=db,
-        session_id=session.id,
-        limit=HISTORY_LIMIT,
-    )
+    # Si algo falla despues de guardar el mensaje del estudiante, se deshace el
+    # turno para que un reintento no lo duplique ni aplique la severidad dos veces.
+    session_id = session.id
+    try:
+        decision, impact = fetch_parallel_inputs(
+            session_id,
+            previous_severity,
+            user_input,
+            trainee_msg_id,
+        )
+        apply_severity(session, decision, impact, profile, db)
+        final_severity = float(session.current_severity)
+        context_history = ConversationRepository.list_recent_by_session(
+            db=db,
+            session_id=session_id,
+            limit=HISTORY_LIMIT,
+        )
+    except Exception:
+        rollback_turn(
+            db,
+            session_id,
+            trainee_msg_id=trainee_msg_id,
+            previous_severity=previous_severity,
+        )
+        raise
 
     forced_close = decision.should_close
     closing = compute_closing_state(
@@ -452,6 +499,8 @@ def _process_turn_inner(session, profile, user_input: str, db: Session) -> TurnC
         b_min=b_min,
         b_max=b_max,
         behavioral_flags=tuple(behavioral_flags),
+        trainee_msg_id=trainee_msg_id,
+        previous_severity=previous_severity,
     )
 
 

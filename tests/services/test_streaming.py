@@ -86,23 +86,85 @@ class TestStreamingConversation(unittest.TestCase):
         self.assertEqual(done_payload["metrics"]["provider"], "deterministic")
         mock_finalize.assert_called_once()
 
-    @patch("app.services.conversation.streaming.handle_stream_error_persistence")
-    @patch("app.services.conversation.streaming.commit_stream_message")
+    @patch("app.services.conversation.streaming.finalize_session_in_generator")
+    @patch("app.services.conversation.streaming.persist_patient_message")
+    @patch("app.services.conversation.core.SessionRepository")
+    @patch("app.services.conversation.core.ConversationRepository")
     @patch("app.services.conversation.streaming.SessionLocal")
-    def test_stream_response_generator_emits_error_when_provider_fails(
+    def test_stream_response_generator_discards_turn_when_provider_fails(
         self,
         mock_session_local,
-        mock_commit,
-        mock_handle_error,
+        mock_conv_repo,
+        mock_session_repo,
+        mock_persist_patient,
+        mock_finalize,
     ):
-        mock_session_local.return_value = MagicMock()
-        mock_commit.return_value = True
+        gen_db = MagicMock()
+        mock_session_local.return_value = gen_db
+        session_row = SimpleNamespace(current_severity=3.4, status="active", ended_at=None)
+        mock_session_repo.get_by_id.return_value = session_row
+        session_id = uuid4()
+        trainee_msg_id = uuid4()
         expected_error = RuntimeError("provider down")
 
         def fake_iter_ai_stream(*, state, **_kwargs):
             state.accumulated = "parcial"
             state.stream_error = expected_error
             yield "event: chunk\ndata: {\"chunk\": \"parcial\"}\n\n"
+
+        with patch("app.services.conversation.streaming.iter_ai_stream", fake_iter_ai_stream):
+            events = list(
+                stream_response_generator(
+                    session_id=session_id,
+                    stream_in=StreamInputs(
+                        system_prompt="prompt",
+                        effective_user_input="hola",
+                        forced_text=None,
+                    ),
+                    context_messages=[],
+                    # should_close=True: aunque el turno iba a cerrar, no debe cerrarse
+                    ctx=_make_ctx(
+                        should_close=True,
+                        closing_kind="crisis",
+                        final_severity=5.0,
+                        trainee_msg_id=trainee_msg_id,
+                        previous_severity=2.8,
+                    ),
+                )
+            )
+
+        # El evento error siempre llega, y es el ultimo
+        self.assertTrue(events[-1].startswith("event: error"))
+        self.assertIn("provider down", events[-1])
+        # Se borra el mensaje trainee del turno y se restaura la severidad previa
+        mock_conv_repo.delete_by_id.assert_called_once_with(gen_db, session_id, trainee_msg_id)
+        self.assertEqual(session_row.current_severity, 2.8)
+        # La sesion no se cierra y no se guarda respuesta del paciente (ni parcial)
+        self.assertEqual(session_row.status, "active")
+        self.assertIsNone(session_row.ended_at)
+        mock_finalize.assert_not_called()
+        mock_persist_patient.assert_not_called()
+        gen_db.commit.assert_called()
+
+    @patch("app.services.conversation.streaming.finalize_session_in_generator")
+    @patch("app.services.conversation.core.SessionRepository")
+    @patch("app.services.conversation.core.ConversationRepository")
+    @patch("app.services.conversation.streaming.SessionLocal")
+    def test_stream_response_generator_emits_error_even_if_rollback_fails(
+        self,
+        mock_session_local,
+        mock_conv_repo,
+        _mock_session_repo,
+        mock_finalize,
+    ):
+        gen_db = MagicMock()
+        mock_session_local.return_value = gen_db
+        mock_conv_repo.delete_by_id.side_effect = RuntimeError("db caida")
+
+        def fake_iter_ai_stream(*, state, **_kwargs):
+            state.stream_error = RuntimeError("provider down")
+            return
+            yield
 
         with patch("app.services.conversation.streaming.iter_ai_stream", fake_iter_ai_stream):
             events = list(
@@ -114,38 +176,48 @@ class TestStreamingConversation(unittest.TestCase):
                         forced_text=None,
                     ),
                     context_messages=[],
-                    ctx=_make_ctx(),
+                    ctx=_make_ctx(trainee_msg_id=uuid4(), previous_severity=2.8),
                 )
             )
 
-        self.assertTrue(any(event.startswith("event: error") for event in events))
-        self.assertIn("provider down", events[-1])
-        mock_handle_error.assert_called_once()
-        mock_commit.assert_not_called()
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0].startswith("event: error"))
+        mock_finalize.assert_not_called()
 
     @patch("app.services.conversation.streaming.finalize_and_evaluate_stream")
     @patch("app.services.conversation.streaming.commit_stream_message", return_value=False)
+    @patch("app.services.conversation.core.SessionRepository")
+    @patch("app.services.conversation.core.ConversationRepository")
     @patch("app.services.conversation.streaming.SessionLocal")
     def test_stream_response_generator_emits_error_when_commit_fails(
         self,
         mock_session_local,
+        mock_conv_repo,
+        mock_session_repo,
         _mock_commit,
         mock_finalize,
     ):
-        mock_session_local.return_value = MagicMock()
+        gen_db = MagicMock()
+        mock_session_local.return_value = gen_db
+        session_row = SimpleNamespace(current_severity=3.4)
+        mock_session_repo.get_by_id.return_value = session_row
+        session_id = uuid4()
+        trainee_msg_id = uuid4()
 
         events = list(
             stream_response_generator(
-                session_id=uuid4(),
+                session_id=session_id,
                 stream_in=StreamInputs(
                     system_prompt=None,
                     effective_user_input="hola",
                     forced_text="respuesta corta",
                 ),
                 context_messages=[],
-                ctx=_make_ctx(),
+                ctx=_make_ctx(trainee_msg_id=trainee_msg_id, previous_severity=2.8),
             )
         )
 
         self.assertEqual(events[-1], 'event: error\ndata: {"error": "DB commit failed"}\n\n')
         mock_finalize.assert_not_called()
+        mock_conv_repo.delete_by_id.assert_called_once_with(gen_db, session_id, trainee_msg_id)
+        self.assertEqual(session_row.current_severity, 2.8)

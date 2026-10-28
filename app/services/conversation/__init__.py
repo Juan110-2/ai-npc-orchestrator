@@ -5,6 +5,7 @@ from app.services.conversation.core import (
     persist_patient_message,
     process_turn,
     resolve_session_context,
+    rollback_turn,
     validate_user_input,
 )
 from app.services.conversation.streaming import (
@@ -20,6 +21,7 @@ __all__ = [
     "persist_patient_message",
     "process_turn",
     "resolve_session_context",
+    "rollback_turn",
     "stream_response_generator",
     "validate_user_input",
 ]

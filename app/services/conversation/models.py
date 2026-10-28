@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from app.services.conversation.heuristics import HeuristicDecision
 
@@ -19,6 +20,10 @@ class TurnContext:
     b_min: float
     b_max: float
     behavioral_flags: tuple[str, ...]
+    # Datos para deshacer el turno si la IA falla (ver rollback_turn): id del
+    # mensaje trainee guardado al inicio y severidad que tenia la sesion antes.
+    trainee_msg_id: UUID | None = None
+    previous_severity: float | None = None
 
 
 @dataclass(frozen=True)

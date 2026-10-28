@@ -86,7 +86,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         self.assertEqual(done_payload["metrics"]["provider"], "deterministic")
         mock_finalize.assert_called_once()
 
-    @patch("app.services.conversation.streaming.handle_stream_error_persistence")
+    @patch("app.services.conversation.streaming.discard_failed_turn")
     @patch("app.services.conversation.streaming.commit_stream_message")
     @patch("app.services.conversation.streaming.SessionLocal")
     @patch("app.api.v1.routes.conversation.build_stream_inputs")
@@ -99,7 +99,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         mock_build_stream_inputs,
         mock_session_local,
         mock_commit,
-        mock_handle_error,
+        mock_discard_turn,
     ):
         session = make_session()
         override_session_access(session)
@@ -130,7 +130,7 @@ class TestConversationStreamRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: error", body)
         self.assertIn("provider down", body)
-        mock_handle_error.assert_called_once()
+        mock_discard_turn.assert_called_once()
         mock_commit.assert_not_called()
 
     @patch("app.services.conversation.streaming.finalize_and_evaluate_stream")
