@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import can_delete_case, ensure_author_or_admin, get_db, require_staff
+from app.api.v1.deps import can_manage_case, ensure_author_or_admin, get_db, require_staff
 from app.core.auth import verify_supabase_jwt
 from app.models.user_profile import UserProfile
 from app.repositories.catalog_usage import BLOCKED, NOT_FOUND
@@ -144,7 +144,7 @@ def delete_scenario(
     item = ScenarioRepository.get_by_id(db, scenario_id)
     if not item:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    ensure_author_or_admin(user, item.created_by, "escenario")
+    ensure_author_or_admin(user, item.created_by, "escenario", "eliminarlo")
     try:
         result = ScenarioRepository.delete_if_unused(db, item.id)
     except IntegrityError:
@@ -199,5 +199,5 @@ def get_scenario_usage(
         sessions_with_activity=usage.sessions_with_activity,
         unused_sessions=usage.unused_sessions,
         can_delete=usage.can_delete,
-        allowed=can_delete_case(user, item.created_by),
+        allowed=can_manage_case(user, item.created_by),
     )

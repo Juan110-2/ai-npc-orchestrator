@@ -121,21 +121,21 @@ def require_staff(
     return user
 
 
-def can_delete_case(user: UserProfile, created_by) -> bool:
+def can_manage_case(user: UserProfile, created_by) -> bool:
     """
-    Si el usuario puede eliminar el caso: es admin o es su autor (`created_by`).
+    Si el usuario puede editar o eliminar el caso: es admin o es su autor (`created_by`).
 
-    Un caso sin autor registrado (creado antes de guardar `created_by`) solo lo elimina un admin.
+    Un caso sin autor registrado (creado antes de guardar `created_by`) solo lo gestiona un admin.
     """
     if user.role == "admin":
         return True
     return created_by is not None and str(created_by) == str(user.id)
 
 
-def ensure_author_or_admin(user: UserProfile, created_by, resource: str) -> None:
-    """Solo el autor del caso o un admin pueden eliminarlo; si no, 403."""
-    if not can_delete_case(user, created_by):
+def ensure_author_or_admin(user: UserProfile, created_by, resource: str, action: str) -> None:
+    """Solo el autor del caso o un admin pueden editarlo o eliminarlo (`action`); si no, 403."""
+    if not can_manage_case(user, created_by):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Solo el autor del {resource} o un admin pueden eliminarlo",
+            detail=f"Solo el autor del {resource} o un admin pueden {action}",
         )

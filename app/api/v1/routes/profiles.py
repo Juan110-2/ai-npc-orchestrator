@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import can_delete_case, ensure_author_or_admin, get_db, require_staff
+from app.api.v1.deps import can_manage_case, ensure_author_or_admin, get_db, require_staff
 from app.core.auth import verify_supabase_jwt
 from app.models.user_profile import UserProfile
 from app.repositories.catalog_usage import BLOCKED, NOT_FOUND
@@ -144,7 +144,7 @@ def delete_profile(
     item = ProfileRepository.get_by_id(db, profile_id)
     if not item:
         raise HTTPException(status_code=404, detail="Profile not found")
-    ensure_author_or_admin(user, item.created_by, "perfil")
+    ensure_author_or_admin(user, item.created_by, "perfil", "eliminarlo")
     try:
         result = ProfileRepository.delete_if_unused(db, item.id)
     except IntegrityError:
@@ -199,5 +199,5 @@ def get_profile_usage(
         sessions_with_activity=usage.sessions_with_activity,
         unused_sessions=usage.unused_sessions,
         can_delete=usage.can_delete,
-        allowed=can_delete_case(user, item.created_by),
+        allowed=can_manage_case(user, item.created_by),
     )
