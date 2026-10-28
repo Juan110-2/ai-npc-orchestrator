@@ -106,7 +106,8 @@ Reglas para cualquier cliente:
 | Sesiones: crear (`POST /sessions/start`) | No | Sí |
 | Sesión, tiempo, cierre, conversación e historial | Solo las suyas | Cualquiera |
 | Perfiles y escenarios: consultar | Sí | Sí |
-| Perfiles y escenarios: crear, editar, eliminar | No | Sí |
+| Perfiles y escenarios: crear y usar en sesiones | No | Sí |
+| Perfiles y escenarios: editar y eliminar | No | Solo el autor (`created_by`) o `admin` |
 | Evaluación: ver | Solo las suyas | Todas |
 | Evaluación: recalcular y calificar | No | Sí |
 | Lista de estudiantes (`GET /admin/students`) | No | Sí |

@@ -13,6 +13,6 @@ class Scenario(Base):
     severity = Column(Integer, nullable=False)
     risk_flags = Column(JSONB, nullable=False, default=list)
     constraints = Column(JSONB, nullable=False, default=dict)
-    # Docente que creó el escenario. No restringe el acceso: los casos son compartidos.
+    # Docente que creó el escenario. Solo él o un admin pueden editarlo o eliminarlo; el resto lo consulta y lo usa.
     created_by = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

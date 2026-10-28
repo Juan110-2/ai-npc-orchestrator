@@ -38,8 +38,9 @@ _404 = {404: {"description": "Escenario no encontrado"}}
         "El escenario define la situación narrativa que el personaje simulado conoce, "
         "la severidad emocional inicial, los indicadores de riesgo y las restricciones "
         "de comportamiento.\n\n"
-        "El usuario autenticado queda registrado como autor (`created_by`); "
-        "el campo es informativo y no restringe quién puede ver o editar el escenario.\n\n"
+        "El usuario autenticado queda registrado como autor (`created_by`). "
+        "Cualquier usuario autenticado puede consultar el escenario y los `teacher`/`admin` pueden usarlo "
+        "en sesiones, pero solo su autor o un `admin` pueden editarlo o eliminarlo.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Escenario creado con UUID, timestamp y autor.",
@@ -100,7 +101,13 @@ def get_scenario(
     description=(
         "Actualiza parcialmente un escenario de simulación. "
         "Solo se modifican los campos incluidos en el body.\n\n"
-        "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían.\n\n"
+        "Nota: `risk_flags` y `constraints` se reemplazan completamente si se envían. "
+        "El autor (`created_by`) no se puede cambiar.\n\n"
+        "Solo puede editarlo su autor (`created_by`) o un `admin`; "
+        "los escenarios sin autor registrado solo los edita un `admin`. "
+        "Si no se cumple, responde 403 y no se modifica nada. "
+        "Los demás docentes pueden usar el escenario en sesiones o duplicarlo desde el cliente "
+        "(crear uno nuevo a partir de este) para adaptarlo.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Escenario actualizado.",
@@ -181,7 +188,8 @@ def delete_scenario(
         "Una sesión tiene actividad si registra al menos un mensaje de conversación, una evaluación "
         "o una llamada a IA; las demás se consideran sin uso y se eliminan junto con el escenario.\n\n"
         "`can_delete` es `true` si no hay sesiones con actividad; `allowed` es `true` si el usuario "
-        "autenticado es el autor del escenario o `admin` (los escenarios sin autor registrado solo los elimina un `admin`).\n\n"
+        "autenticado es el autor del escenario o `admin`, que son quienes pueden editarlo y eliminarlo "
+        "(los escenarios sin autor registrado solo los gestiona un `admin`).\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Conteo de sesiones del escenario y permisos de eliminación.",

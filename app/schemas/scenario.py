@@ -108,7 +108,11 @@ class ScenarioResponse(ScenarioCreate):
     id: UUID = Field(..., description="Identificador único del escenario.")
     created_at: datetime = Field(..., description="Fecha y hora de creación (UTC).")
     created_by: Optional[UUID] = Field(
-        None, description="Docente que creó el escenario (informativo; no restringe el acceso)."
+        None,
+        description=(
+            "Docente que creó el escenario. Solo él o un `admin` pueden editarlo o eliminarlo; "
+            "si es `null`, solo un `admin`."
+        ),
     )
 
     model_config = {

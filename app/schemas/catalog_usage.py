@@ -33,8 +33,8 @@ class CatalogUsageResponse(BaseModel):
     allowed: bool = Field(
         ...,
         description=(
-            "`true` si el usuario autenticado puede eliminarlo: es su autor (`created_by`) o `admin`. "
-            "Los casos sin autor registrado solo los elimina un `admin`."
+            "`true` si el usuario autenticado puede editarlo y eliminarlo: es su autor (`created_by`) o `admin`. "
+            "Los casos sin autor registrado solo los gestiona un `admin`."
         ),
         examples=[True],
     )

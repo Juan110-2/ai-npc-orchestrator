@@ -115,7 +115,11 @@ class ProfileResponse(BaseModel):
     created_at: datetime = Field(..., description="Fecha y hora de creación (UTC).")
     updated_at: datetime = Field(..., description="Fecha y hora de última modificación (UTC).")
     created_by: Optional[UUID] = Field(
-        None, description="Docente que creó el perfil (informativo; no restringe el acceso)."
+        None,
+        description=(
+            "Docente que creó el perfil. Solo él o un `admin` pueden editarlo o eliminarlo; "
+            "si es `null`, solo un `admin`."
+        ),
     )
 
     model_config = {

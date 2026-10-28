@@ -38,8 +38,9 @@ _404 = {404: {"description": "Perfil no encontrado"}}
         "El perfil define la identidad (`traits`) y el comportamiento conversacional (`behavior`) "
         "del personaje, incluyendo el rango de severidad emocional permitido "
         "(`behavior_min` / `behavior_max`).\n\n"
-        "El usuario autenticado queda registrado como autor (`created_by`); "
-        "el campo es informativo y no restringe quién puede ver o editar el perfil.\n\n"
+        "El usuario autenticado queda registrado como autor (`created_by`). "
+        "Cualquier usuario autenticado puede consultar el perfil y los `teacher`/`admin` pueden usarlo "
+        "en sesiones, pero solo su autor o un `admin` pueden editarlo o eliminarlo.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Perfil creado con UUID, timestamps y autor.",
@@ -100,7 +101,13 @@ def get_profile(
     description=(
         "Actualiza parcialmente un perfil de personaje simulado. "
         "Solo se modifican los campos enviados en el body; los omitidos conservan su valor actual.\n\n"
-        "Nota: `traits` y `behavior` se reemplazan por completo si se envían.\n\n"
+        "Nota: `traits` y `behavior` se reemplazan por completo si se envían. "
+        "El autor (`created_by`) no se puede cambiar.\n\n"
+        "Solo puede editarlo su autor (`created_by`) o un `admin`; "
+        "los perfiles sin autor registrado solo los edita un `admin`. "
+        "Si no se cumple, responde 403 y no se modifica nada. "
+        "Los demás docentes pueden usar el perfil en sesiones o duplicarlo desde el cliente "
+        "(crear uno nuevo a partir de este) para adaptarlo.\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Perfil actualizado.",
@@ -181,7 +188,8 @@ def delete_profile(
         "Una sesión tiene actividad si registra al menos un mensaje de conversación, una evaluación "
         "o una llamada a IA; las demás se consideran sin uso y se eliminan junto con el perfil.\n\n"
         "`can_delete` es `true` si no hay sesiones con actividad; `allowed` es `true` si el usuario "
-        "autenticado es el autor del perfil o `admin` (los perfiles sin autor registrado solo los elimina un `admin`).\n\n"
+        "autenticado es el autor del perfil o `admin`, que son quienes pueden editarlo y eliminarlo "
+        "(los perfiles sin autor registrado solo los gestiona un `admin`).\n\n"
         "Requiere JWT y rol `teacher` o `admin`."
     ),
     response_description="Conteo de sesiones del perfil y permisos de eliminación.",
