@@ -101,9 +101,9 @@ def compute_automatic_metrics(db: Session, session_id: UUID) -> dict:
 
     # Turnos del NPC que responden a una pregunta de cuidado (risk_check) del
     # estudiante. La marca depende de la pregunta, no de lo que responda el NPC:
-    # cuenta tambien si niega el riesgo. A diferencia de risk_alerts_detected,
-    # esto NO es una senal negativa sobre el estudiante -- el estudiante pregunto
-    # bien -- pero el profesor igual necesita ver que se hablo de riesgo.
+    # cuenta también si niega el riesgo. A diferencia de risk_alerts_detected,
+    # esto NO es una señal negativa sobre el estudiante (preguntó bien), pero
+    # el profesor igual necesita ver que se habló de riesgo.
     risk_check_alerts = db.execute(text("""
         select count(*)::int as n
         from public.conversation_messages
