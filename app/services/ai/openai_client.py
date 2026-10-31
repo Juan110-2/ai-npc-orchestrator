@@ -18,8 +18,9 @@ class OpenAIClient(AIClient):
     model = "gpt-4o-mini"
 
     def __init__(self) -> None:
-        # timeout total por llamada para no colgar el endpoint si OpenAI tarda
-        self.client = OpenAI(api_key=OPENAI_API_KEY, timeout=20.0, max_retries=1)
+        # timeout por intento para no colgar el endpoint si OpenAI tarda. Con el reintento
+        # debe caber en PARALLEL_TIMEOUT_S (20 s); si no, el resultado del reintento se pierde.
+        self.client = OpenAI(api_key=OPENAI_API_KEY, timeout=8.0, max_retries=1)
 
     def _build_messages(
         self,

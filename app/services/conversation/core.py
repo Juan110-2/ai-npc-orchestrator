@@ -295,7 +295,7 @@ def apply_closed_session_state(session, ctx: TurnContext) -> None:
         session.current_severity = ctx.b_min
     elif ctx.closing_kind == "crisis":
         session.current_severity = ctx.b_max
-    session.status = "terminated" if ctx.closing_kind in ("crisis", "inappropriate") else "completed"
+    session.status = "terminated" if ctx.closing_kind in ("crisis", "crisis_riesgo", "inappropriate") else "completed"
     session.ended_at = datetime.now(timezone.utc)
 
 

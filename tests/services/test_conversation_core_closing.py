@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from app.services.conversation.core import compute_closing_state
+from app.services.conversation.core import apply_closed_session_state, compute_closing_state
 from app.services.conversation.heuristics import MessageCategory
 
 
@@ -62,6 +62,21 @@ class TestComputeClosingStateCrisisKind(unittest.TestCase):
         )
         self.assertIsNotNone(result)
         self.assertEqual(result["kind"], "crisis")
+
+
+class TestApplyClosedSessionStateStatus(unittest.TestCase):
+    def _status_after_closing(self, closing_kind: str) -> str:
+        session = SimpleNamespace(current_severity=4.5, status="active", ended_at=None)
+        ctx = SimpleNamespace(closing_kind=closing_kind, b_min=0.0, b_max=5.0)
+        apply_closed_session_state(session, ctx)
+        return session.status
+
+    def test_cierres_adversos_quedan_terminated(self):
+        for closing_kind in ("crisis", "crisis_riesgo", "inappropriate"):
+            self.assertEqual(self._status_after_closing(closing_kind), "terminated")
+
+    def test_cierre_por_exito_queda_completed(self):
+        self.assertEqual(self._status_after_closing("success"), "completed")
 
 
 if __name__ == "__main__":
