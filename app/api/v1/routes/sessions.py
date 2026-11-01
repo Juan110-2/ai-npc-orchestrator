@@ -256,10 +256,11 @@ def list_sessions(
     db: Session = Depends(get_db),
     payload: dict = Depends(verify_supabase_jwt),
 ):
+    # Desactivado: una sesión abandonada sigue activa hasta que alguien la finalice.
     # No hay cron en este proyecto: se cierran perezosamente acá las sesiones
     # "active" abandonadas (pestaña cerrada sin terminar la conversación) para
     # que no ensucien el conteo de sesiones activas ni los cálculos de duración.
-    auto_close_stale_sessions(db)
+    # auto_close_stale_sessions(db)
 
     offset = (page - 1) * limit
     total, items = _paginated_sessions(db, payload, view, status_filter, limit, offset)
