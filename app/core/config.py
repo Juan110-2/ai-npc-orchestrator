@@ -8,6 +8,11 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")
 
+# Conexiones del pool: cada turno usa varias a la vez (solicitud, tareas en paralelo y streaming).
+# El total (DB_POOL_SIZE + DB_MAX_OVERFLOW) debe quedar por debajo del límite del servidor de base de datos.
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+
 # ----- Proveedor de IA activo -----------------------------------------------
 # Valores validos: "openai" | "gemini" | "deepseek" | "mock"
 # El valor por defecto es "mock" para no requerir keys en desarrollo local.

@@ -3,7 +3,7 @@ fastapi
 uvicorn[standard]
 
 # Base de datos
-sqlalchemy
+sqlalchemy>=2.0.50,<2.2
 psycopg2-binary
 
 # Utilidades
